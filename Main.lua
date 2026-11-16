@@ -10,7 +10,7 @@
 -- (Whether Auto Spin is on is never saved.)
 local HttpService = game:GetService("HttpService")
 local SAVE_FILE = "WvoxuFruitSpinner.json"
-local saved = {}
+local saved = HttpService:JSONDecode("{}") -- (decoded this way so editors treat it as a flexible table)
 local canSave = (writefile and readfile and isfile) ~= nil
 if canSave and isfile(SAVE_FILE) then
     local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(SAVE_FILE)) end)
@@ -340,7 +340,7 @@ local function spinLoop(myRun)
 
     if gemsStart < cost then
         running = false
-        setStatus("not enough gems")
+        setStatus("Not enough gems")
         notify("Fruit Spinner", "Not enough gems to spin")
         return
     end
@@ -361,9 +361,9 @@ local function spinLoop(myRun)
         end
         if keep then
             running = false
-            local reason = "slot " .. slot .. " already has " .. keep
-            setStatus("stopped, " .. reason)
-            notify("Fruit Spinner", reason .. ", not spinning")
+            local reason = "Slot " .. slot .. " already has " .. keep
+            setStatus("Stopped: " .. reason)
+            notify("Fruit Spinner", reason)
             print("Script has stopped, " .. reason)
             return
         end
@@ -392,7 +392,7 @@ local function spinLoop(myRun)
         local spinsSpent = math.floor(gemsSpent / cost)
 
         print("You got " .. inGameName .. " [Rarity:" .. rarity .. "]")
-        setStatus("spin " .. spins .. " - got " .. inGameName .. " (" .. rarity .. "), " .. gemsLeft .. " gems left")
+        setStatus("Spin " .. spins .. ": Got " .. inGameName .. " (" .. rarity .. "), " .. gemsLeft .. " gems left")
 
         local description = "**Slot : " .. tostring(slot)
         if official then
@@ -419,18 +419,18 @@ local function spinLoop(myRun)
         local raritySet = toSet(wantedRarities, normRarity)
         local reason = nil
         if fruitSet[norm(inGameName)] then
-            reason = "got " .. inGameName
+            reason = "Got " .. inGameName
         elseif info and raritySet[norm(info.rarity)] then
-            reason = "got " .. inGameName .. " (" .. rarity .. ")"
+            reason = "Got " .. inGameName .. " (" .. rarity .. ")"
         elseif not info and stopOnUnknown then
-            reason = "got an unknown fruit: " .. inGameName
+            reason = "Got an unknown fruit: " .. inGameName
         elseif gemsLeft < cost then
-            reason = "out of gems"
+            reason = "Out of gems"
         end
 
         if reason then
             running = false
-            setStatus("stopped, " .. reason)
+            setStatus("Stopped: " .. reason)
             notify("Fruit Spinner stopped", reason)
             print("Script has stopped")
             task.spawn(sendWebhook, { title = "Script has stopped", description = reason, color = 0xffffff })
@@ -444,13 +444,13 @@ local function startSpinning()
     running = true
     runId = runId + 1
     local myRun = runId
-    setStatus("spinning...")
+    setStatus("Spinning...")
 
     task.spawn(function()
         local ok, err = pcall(spinLoop, myRun)
         if not ok then
             running = false
-            setStatus("error - " .. tostring(err))
+            setStatus("Error: " .. tostring(err))
             notify("Fruit Spinner error", tostring(err))
         end
         -- finished on its own (not turned off by hand): flip the switch back
@@ -464,13 +464,13 @@ local function stopSpinning()
     if not running then return end
     running = false
     runId = runId + 1 -- lets a loop that's mid-wait know it should quit
-    setStatus("stopped")
+    setStatus("Stopped")
 end
 
 ----------------------------------------------------------------------
 -- CONTROLS
 ----------------------------------------------------------------------
-statusLabel = ui:AddLabel("Status: idle")
+statusLabel = ui:AddLabel("Status: Idle")
 statusLabel.TextXAlignment = Enum.TextXAlignment.Center
 
 autoToggle = ui:AddToggle({
