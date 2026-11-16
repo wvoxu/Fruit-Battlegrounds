@@ -93,7 +93,8 @@ local UILibrary = safeloadstring("https://raw.githubusercontent.com/SugaBlaz/UI-
 -- DATA
 ----------------------------------------------------------------------
 local SPIN_COST = 50    -- gems per spin (re-measured after the first spin)
-local SPIN_DELAY = 5.1  -- seconds between spins
+local SPIN_DELAY = 5.1  -- seconds between normal spins
+local FAST_DELAY = 1.1  -- seconds between Fast spins (server accepts about one per second)
 
 -- rarest first, so the good stuff is at the top of the list
 local RARITIES = { "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
@@ -181,6 +182,7 @@ local slotNumber = tonumber(env.fruitslot) or tonumber(saved.slot) or 1
 local wantedFruits = {}
 local wantedRarities = {}
 local stopOnUnknown = saved.stopOnUnknown ~= false
+local fastSpin = saved.fastSpin == true
 local webhookUrl = type(saved.webhook) == "string" and saved.webhook or ""
 if type(env.webhookslink) == "string" and env.webhookslink ~= "link here" then
     webhookUrl = env.webhookslink
@@ -213,7 +215,7 @@ for _, v in ipairs(presetRarities) do table.insert(wantedRarities, v) end
 ----------------------------------------------------------------------
 local ui = UILibrary.Main.new({
     TitleText = "Fruit Spinner (by wvoxu)",
-    Size = UDim2.new(0, 300, 0, 380),
+    Size = UDim2.new(0, 300, 0, 410),
     Position = UDim2.new(0.5, -150, 0.5, -190),
     Theme = "Ghost",
     KeySystemEnabled = false,
@@ -238,6 +240,7 @@ saveSettings = function()
             fruits = copyList(wantedFruits),
             rarities = copyList(wantedRarities),
             stopOnUnknown = stopOnUnknown,
+            fastSpin = fastSpin,
             webhook = webhookUrl,
             uiKey = uiKey.Name,
         }))
@@ -345,13 +348,34 @@ local function spinLoop(myRun)
     local spinsStart = math.floor(gemsStart / cost)
     invoke("SwitchSlot", { Slot = slot })
 
+    -- safety net: if the fruit already in the slot is one you want, don't spin it away
+    task.wait(0.5)
+    do
+        local current = tostring(data.Slots[tostring(slot)].Value)
+        local currentInfo = FRUIT_INFO[norm(current)]
+        local keep = nil
+        if toSet(wantedFruits, norm)[norm(current)] then
+            keep = current
+        elseif currentInfo and toSet(wantedRarities, normRarity)[norm(currentInfo.rarity)] then
+            keep = current .. " (" .. currentInfo.rarity .. ")"
+        end
+        if keep then
+            running = false
+            local reason = "slot " .. slot .. " already has " .. keep
+            setStatus("stopped, " .. reason)
+            notify("Fruit Spinner", reason .. ", not spinning")
+            print("Script has stopped, " .. reason)
+            return
+        end
+    end
+
     local spins = 0
     while running and runId == myRun do
-        task.wait(SPIN_DELAY)
+        task.wait(fastSpin and FAST_DELAY or SPIN_DELAY)
         if not (running and runId == myRun) then return end -- stopped while waiting
 
         local gemsBefore = data.Gems.Value
-        invoke("Spin", {})
+        invoke("Spin", fastSpin and { Type = "Fast" } or {})
         spins = spins + 1
 
         local inGameName = tostring(data.Slots[tostring(slot)].Value)
@@ -496,6 +520,16 @@ ui:AddMultiDropdown({
     SavingEnabled = false,
     Callback = function(selected)
         wantedRarities = selected
+        saveSettings()
+    end,
+})
+
+ui:AddToggle({
+    Text = "Fast Spin",
+    Default = fastSpin,
+    SavingEnabled = false,
+    Callback = function(state)
+        fastSpin = state
         saveSettings()
     end,
 })
