@@ -1,108 +1,123 @@
-----------------------------------------------------------------------
--- CONFIG
-----------------------------------------------------------------------
-local config = {
-    slot     = 1,                 -- which fruit slot to spin in
-    fruits   = { "Barrier" },     -- stop when you get any of these (in-game names, see the list below)
-    rarities = { },               -- stop on any of these: Common, Uncommon, Rare, Epic, Legendary, Mythic
-    webhook  = "",                -- your Discord webhook URL (leave empty for none)
-}
+-- Fruit Spinner (by wvoxu)
+-- Spins your fruit slot until you land a fruit / rarity you picked, or you run out of gems.
+-- Pick everything in the window. Optional: set these globals before running to pre-fill it
+-- (the old script used them): fruitslot, fruits, rarity, webhookslink
 
--- Optional: if you set these globals before running (the way the old script worked),
--- they override the values above.
-local env = (getgenv and getgenv()) or _G
-local slot     = env.fruitslot    or config.slot
-local wantedFruits   = env.fruits        or config.fruits
-local wantedRarities = env.rarity        or config.rarities
-local webhookUrl     = env.webhookslink  or config.webhook
+----------------------------------------------------------------------
+-- LOADING THE UI LIBRARY
+----------------------------------------------------------------------
+local function safeloadstring(url)
+    local source = game:HttpGet(url)
+    -- RightShift hides/shows the window (library default is F3)
+    source = source:gsub("Enum%.KeyCode%.F3", "Enum.KeyCode.RightShift", 1)
+    -- skip the logo intro (and the wait that comes with it)
+    source = source:gsub("self:Intro%(%)%s*task%.wait%(1%)", "", 1)
+    -- remove the F2 "hide whole GUI" keybind so RightShift is the only UI toggle
+    source = source:gsub('self:AddSettingKeybind%(%{%s*Text = "Toggle SBEUI GUI".-%}%)', "", 1)
+    source = source:gsub("Toggle SBEUI Frame", "Toggle UI", 1)
+    -- no search bar row: shrink the title bar to just the title
+    source = source:gsub("self%.Config%.TitleHeight %+ 35", "self.Config.TitleHeight")
+
+    -- Notifications: theme colours, no accent strip, no countdown bar.
+    -- (The notification is a CanvasGroup, and a UIGradient on one tints everything inside it,
+    -- so the gradient is made neutral and the real colour goes on the background.)
+    local function replace(old, new)
+        local a, b = source:find(old, 1, true)
+        if a then
+            source = source:sub(1, a - 1) .. new .. source:sub(b + 1)
+        end
+    end
+    replace("config.AccentColor or Color3.fromRGB(0, 200, 255)", "config.AccentColor or self.Colors.AccentColor")
+    replace("frame.BackgroundColor3 = Color3.fromRGB(100, 100, 100)", "frame.BackgroundColor3 = self.Colors.MainFrameColor")
+    replace("Color3.fromRGB(80, 80, 90)", "Color3.fromRGB(255, 255, 255)")
+    replace("Color3.fromRGB(40, 40, 45)", "Color3.fromRGB(255, 255, 255)")
+    replace("title.TextColor3 = Color3.fromRGB(255, 255, 255)", "title.TextColor3 = self.Colors.TitleColor")
+    replace("msg.TextColor3 = Color3.fromRGB(245, 245, 245)", "msg.TextColor3 = self.Colors.LabelColor")
+    replace("closeBtn.TextColor3 = Color3.fromRGB(255, 0, 0)", "closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)")
+    replace("accent.Size = UDim2.new(0, 5, 1, 0)", "accent.Size = UDim2.new(0, 0, 1, 0)")
+    replace("progressBarBackground.BackgroundTransparency = 0.7", "progressBarBackground.BackgroundTransparency = 1")
+    replace("progressBar.BackgroundColor3 = Color3.fromRGB(255,255,255)", "progressBar.BackgroundTransparency = 1")
+
+    local func, err = loadstring(source)
+    if func then
+        return func()
+    end
+    warn("LOADSTRING FAILED: " .. tostring(err))
+    return nil
+end
+
+local UILibrary = safeloadstring("https://raw.githubusercontent.com/SugaBlaz/UI-Library/refs/heads/main/Orbital%20UI.lua")
 
 ----------------------------------------------------------------------
 -- DATA
 ----------------------------------------------------------------------
-local SPIN_COST = 50      -- gems per spin
-local SPIN_DELAY = 5.1    -- seconds between spins
+local SPIN_COST = 50    -- gems per spin (re-measured after the first spin)
+local SPIN_DELAY = 5.1  -- seconds between spins
+
+-- rarest first, so the good stuff is at the top of the list
+local RARITIES = { "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
+
+local FRUITS_BY_RARITY = {
+    Mythic    = { "Lightning", "Nika", "DragonV2", "Soul", "DarkxQuake", "Okuchi", "DoughV2", "LeopardV2", "Impact", "OpeV2" },
+    Legendary = { "Quake", "Gravity", "Phoenix", "TSRubber", "Dragon", "Dough", "Magnet", "Leopard", "Ope", "Venom", "MagmaV2", "IceV2", "LightV2", "FlameV2" },
+    Epic      = { "Light", "Flame", "Magma", "Paw", "String", "Love", "Snow" },
+    Rare      = { "Bomb", "Ice", "Darkness", "Ash" },
+    Uncommon  = { "Smoke", "Rubber", "Falcon", "Gas" },
+    Common    = { "Barrier", "Chop", "Sand" },
+}
 
 local RARITY_COLORS = {
-    Common    = 0x808080,
-    Uncommon  = 0x7aff9d,
-    Rare      = 0x478dff,
-    Epic      = 0xd465e5,
+    Mythic    = 0xffeb6a,
     Legendary = 0xff7e39,
-    Mythical  = 0xffeb6a,
+    Epic      = 0xd465e5,
+    Rare      = 0x478dff,
+    Uncommon  = 0x7aff9d,
+    Common    = 0x808080,
 }
 
--- in-game name -> info
-local FRUITS = {
-    { name = "Barrier", official = "Bari Bari no Mi", rarity = "Common",
-      image = "https://trello.com/1/cards/640c774c8346bc615c9130d1/attachments/645aa80b9c56fc47f10c45d4/previews/645aa80b9c56fc47f10c4609/download/barrierbannerfbv2.png" },
-    { name = "Chop", official = "Bara Bara no Mi", rarity = "Common",
-      image = "https://trello.com/1/cards/640c777c5335d2a58fb085be/attachments/645aa81805f0b3aa8e7d6222/previews/645aa81805f0b3aa8e7d622e/download/chopbannerfbv2.png" },
-    { name = "Sand", official = "Suna Suna no Mi", rarity = "Common",
-      image = "https://trello.com/1/cards/640c77801627bd29930bf6a0/attachments/645aa827cd5493524d4e3c91/previews/645aa828cd5493524d4e3cbe/download/sandbannerfbv2.png" },
-    { name = "Smoke", official = "Moku Moku no Mi", rarity = "Uncommon",
-      image = "https://trello.com/1/cards/640c7783f8a59acdef0ae521/attachments/645aa832347e3db20572f8e7/previews/645aa832347e3db20572f8ef/download/smokebannerfbv2.png" },
-    { name = "Rubber", official = "Gomu Gomu no Mi", rarity = "Uncommon",
-      image = "https://trello.com/1/cards/640c7792a3708b8c25511bc2/attachments/645aa851c36c94c1867bb000/previews/645aa852c36c94c1867bb055/download/rubberbannerfbv2.png" },
-    { name = "Gas", official = "Gasu Gasu no Mi", rarity = "Uncommon",
-      image = "https://trello.com/1/cards/6455b685698bb2cc561bfb2d/attachments/645aa83bde09c2c77a3dceb4/previews/645aa83cde09c2c77a3dceca/download/gasbannerfbv2.png" },
-    { name = "Falcon", official = "Tori Tori no Mi, Model: Falcon", rarity = "Uncommon",
-      image = "https://trello.com/1/cards/6455b688e0d3dc321f250b3b/attachments/645aa85bc89ab8e61407286b/previews/645aa85bc89ab8e614072963/download/falconbannerv2.png" },
-    { name = "Bomb", official = "Bomu Bomu no Mi", rarity = "Rare",
-      image = "https://trello.com/1/cards/640c77a1595841caf51e003d/attachments/645aa86ecd7c7df4c805679b/previews/645aa86fcd7c7df4c80567ef/download/bombbannerfbv2.png" },
-    { name = "Ice", official = "Hie Hie no Mi", rarity = "Rare",
-      image = "https://trello.com/1/cards/640c77eb2331836d7158a1f1/attachments/645aa889d07981ba9748db66/previews/645aa88ad07981ba9748dbca/download/icebannerfbv2.png" },
-    { name = "Darkness", official = "Yami Yami no Mi", rarity = "Rare",
-      image = "https://trello.com/1/cards/640c77f8f91d029cf28fbcfa/attachments/645aa89a5451c1ab3208c49b/previews/645aa89b5451c1ab3208c677/download/darknessbannerfbv2.png" },
-    { name = "Light", official = "Pika Pika no Mi", rarity = "Epic",
-      image = "https://trello.com/1/cards/640c780e1e70d6393b45dc0b/attachments/645805de415b8c9b35df8bfd/previews/645805df415b8c9b35df8ca8/download/lightbannerfbv2.png" },
-    { name = "Flame", official = "Mera Mera no Mi", rarity = "Epic",
-      image = "https://trello.com/1/cards/640c781bc81456570a0756eb/attachments/6458056d426c4da42d7b9119/previews/6458056d426c4da42d7b929b/download/flamebannerfbv2.png" },
-    { name = "Paw", official = "Nikyu Nikyu no Mi", rarity = "Epic",
-      image = "https://trello.com/1/cards/640c783143a9de5c047225e0/attachments/645804e46c0aa9629353e704/previews/645804e56c0aa9629353e710/download/image_2023-05-05_201353704%283%29%282%29.png" },
-    { name = "Magma", official = "Magu Magu no Mi", rarity = "Epic",
-      image = "https://trello.com/1/cards/640c78276e1fd7cf5390b42a/attachments/645803d9226638fb91e5780b/previews/645803da226638fb91e57817/download/magmabannerfbv2.png" },
-    { name = "String", official = "Ito Ito no Mi", rarity = "Epic",
-      image = "https://trello.com/1/cards/648ee747d56a7f6124f3b1be/attachments/648ee7526004730e936e8d06/previews/648ee7536004730e936e8f0c/download/StringBannerFB.png" },
-    { name = "Quake", official = "Gura Gura no Mi", rarity = "Legendary",
-      image = "https://trello.com/1/cards/640c783fa2a582bc1044fada/attachments/6458014e2d5e8e0882e9eaf9/download/quakebannerfbv2.png" },
-    { name = "Magnet", official = "Jiki Jiki no Mi", rarity = "Legendary",
-      image = "https://trello.com/1/cards/64619b091821cac18d8fd604/attachments/6461ac0220e05f4a5818319b/download/image.png" },
-    { name = "Gravity", official = "Zushi Zushi no Mi", rarity = "Legendary",
-      image = "https://trello.com/1/cards/640c784fad1a4320837c7d5f/attachments/645800c1e42b7aacc516b23c/previews/645800c2e42b7aacc516b283/download/GRAVITYbannerfbv2.png" },
-    { name = "Phoenix", official = "Tori Tori no Mi, Model: Phoenix", rarity = "Legendary",
-      image = "https://trello.com/1/cards/640c7859aeaf58e1177dee7f/attachments/6458002d13c783bab0fba127/previews/6458002e13c783bab0fba133/download/phoenixbannerfbv2.png" },
-    { name = "TSRubber", official = "Gomu Gomu no Mi-(Timeskip)", rarity = "Legendary",
-      image = "https://trello.com/1/cards/640c78680618a3acb5c8a520/attachments/6457ff69a69a559a96e0bf02/previews/6457ff6aa69a559a96e0bfb3/download/TSRUBBERbannerfbv2.png" },
-    { name = "Leopard", official = "Neko Neko no Mi, Model: Leopard", rarity = "Mythical",
-      image = "https://trello.com/1/cards/64619b01f25809c82aaff841/attachments/6461ac55e7296d488c3ed3eb/previews/6461ac56e7296d488c3ed3fd/download/leopardbannerfbv2.png" },
-    { name = "Dough", official = "Mochi Mochi no Mi", rarity = "Mythical",
-      image = "https://trello.com/1/cards/640c78753a36660d4ec63b81/attachments/6457fe0e16e1bc3c76f40e9e/previews/6457fe0f16e1bc3c76f40eaa/download/doughbannerfbv2.png" },
-    { name = "Dragon", official = "Uo Uo no Mi, Model: Seiryu", rarity = "Mythical",
-      image = "https://trello.com/1/cards/640c787f137dee4ff4c31317/attachments/6457fcfae219beebabc93af4/previews/6457fcfbe219beebabc93b00/download/image_2023-05-05_201353704%283%29.png" },
-    { name = "Lightning", official = "Goro Goro no Mi", rarity = "Mythical",
-      image = "https://trello.com/1/cards/6455b68851830ae2486a4c18/attachments/6457fae033eb5b7d15413235/previews/6457fae133eb5b7d15413284/download/lightningbannerfbv2.png" },
-    { name = "Ope", official = "Ope Ope no Mi", rarity = "Mythical",
-      image = "https://trello.com/1/cards/648bfafa39104e81e63b5dc3/attachments/648ee725a755659873195cd2/previews/648ee726a755659873195d7d/download/image.png" },
-    { name = "Venom", official = "Doku Doku no Mi", rarity = "Mythical",
-      image = "https://trello.com/1/cards/64bec42c8048e8daa1e9d8e7/attachments/64bec42c8048e8daa1e9d970/previews/64bec42d8048e8daa1e9d98e/download/VenomBannerFB.png" },
-    { name = "Nika", official = "Hito Hito no Mi, Model: Nika", rarity = "Mythical",
-      image = "https://trello.com/1/cards/65005640d6e3a28a72d9bc4f/attachments/65005648db5624afe775992a/previews/65005648db5624afe7759ac7/download/NikaBannerv2.png" },
+-- official names, where known (only used in the webhook text)
+local OFFICIAL = {
+    Barrier = "Bari Bari no Mi", Chop = "Bara Bara no Mi", Sand = "Suna Suna no Mi",
+    Smoke = "Moku Moku no Mi", Rubber = "Gomu Gomu no Mi", Gas = "Gasu Gasu no Mi",
+    Falcon = "Tori Tori no Mi, Model: Falcon", Bomb = "Bomu Bomu no Mi", Ice = "Hie Hie no Mi",
+    Darkness = "Yami Yami no Mi", Light = "Pika Pika no Mi", Flame = "Mera Mera no Mi",
+    Paw = "Nikyu Nikyu no Mi", Magma = "Magu Magu no Mi", String = "Ito Ito no Mi",
+    Quake = "Gura Gura no Mi", Magnet = "Jiki Jiki no Mi", Gravity = "Zushi Zushi no Mi",
+    Phoenix = "Tori Tori no Mi, Model: Phoenix", TSRubber = "Gomu Gomu no Mi-(Timeskip)",
+    Leopard = "Neko Neko no Mi, Model: Leopard", Dough = "Mochi Mochi no Mi",
+    Dragon = "Uo Uo no Mi, Model: Seiryu", Lightning = "Goro Goro no Mi", Ope = "Ope Ope no Mi",
+    Venom = "Doku Doku no Mi", Nika = "Hito Hito no Mi, Model: Nika",
 }
 
-local fruitByName = {}
-for _, f in ipairs(FRUITS) do
-    fruitByName[f.name] = f
+-- lowercase, no spaces/dashes: "Dragon V2" and "DragonV2" both match
+local function norm(s)
+    return (tostring(s):lower():gsub("[%s_%-]", ""))
+end
+
+local function normRarity(s)
+    local n = norm(s)
+    if n == "mythical" then n = "mythic" end
+    return n
+end
+
+local FRUIT_NAMES = {}   -- for the dropdown, rarest first
+local FRUIT_INFO = {}    -- norm(name) -> { name, rarity }
+for _, rarity in ipairs(RARITIES) do
+    for _, name in ipairs(FRUITS_BY_RARITY[rarity]) do
+        table.insert(FRUIT_NAMES, name)
+        FRUIT_INFO[norm(name)] = { name = name, rarity = rarity }
+    end
 end
 
 ----------------------------------------------------------------------
--- SETUP
+-- GAME HELPERS
 ----------------------------------------------------------------------
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
-local data = player.MAIN_DATA
+local data = player:WaitForChild("MAIN_DATA")
 
 -- anti-AFK
 for _, connection in pairs(getconnections(player.Idled)) do
@@ -111,66 +126,180 @@ end
 
 local httpRequest = (syn and syn.request) or http_request or request
 
-local function contains(list, value)
-    for _, v in pairs(list) do
-        if v == value then return true end
+local function invoke(action, args)
+    return ReplicatedStorage.Replicator:InvokeServer("FruitsHandler", action, args)
+end
+
+----------------------------------------------------------------------
+-- STATE
+----------------------------------------------------------------------
+local env = (getgenv and getgenv()) or _G
+
+local running = false
+local runId = 0
+local slotNumber = tonumber(env.fruitslot) or 1
+local wantedFruits = {}
+local wantedRarities = {}
+local stopOnUnknown = true
+local webhookUrl = ""
+if type(env.webhookslink) == "string" and env.webhookslink ~= "link here" then
+    webhookUrl = env.webhookslink
+end
+
+-- pre-fill from the old globals, if they were set
+local presetFruits, presetRarities = {}, {}
+if type(env.fruits) == "table" then
+    for _, name in pairs(env.fruits) do
+        local info = FRUIT_INFO[norm(name)]
+        table.insert(presetFruits, info and info.name or tostring(name))
     end
-    return false
+end
+if type(env.rarity) == "table" then
+    for _, r in pairs(env.rarity) do
+        for _, canonical in ipairs(RARITIES) do
+            if normRarity(r) == norm(canonical) then
+                table.insert(presetRarities, canonical)
+            end
+        end
+    end
+end
+for _, v in ipairs(presetFruits) do table.insert(wantedFruits, v) end
+for _, v in ipairs(presetRarities) do table.insert(wantedRarities, v) end
+
+----------------------------------------------------------------------
+-- UI
+----------------------------------------------------------------------
+local ui = UILibrary.Main.new({
+    TitleText = "Fruit Spinner (by wvoxu)",
+    Size = UDim2.new(0, 300, 0, 380),
+    Position = UDim2.new(0.5, -150, 0.5, -190),
+    Theme = "Ghost",
+    KeySystemEnabled = false,
+    SaveOnExit = false,
+    NotifcationSound = "", -- silent notifications
+})
+ui:CreateUI()
+
+ui.Colors.ToggleColorOFF = Color3.fromRGB(255, 95, 95)
+ui.Colors.ToggleColorON = Color3.fromRGB(95, 230, 130)
+ui.Colors.ToggleColor = Color3.fromRGB(18, 18, 18)
+
+-- remove the tab column + search bar and tidy the title bar
+ui.TabScrollingFrame.Visible = false
+ui.SearchFrame.Visible = false
+ui.TitleText.Position = UDim2.new(0, 12, 0, 0)
+ui.MinimizeButton.Parent.Position = UDim2.new(1, 0, 0, 0)
+ui.SettingsBtn.Position = UDim2.new(1, -90, 0, 2.5)
+
+-- full-width content, centred
+local contentPadding = ui.ScrollingFrame:FindFirstChildOfClass("UIPadding")
+if contentPadding then
+    contentPadding.PaddingLeft = UDim.new(0, 0)
+    contentPadding.PaddingRight = UDim.new(0, 0)
+end
+ui.UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local statusLabel
+local autoToggle
+
+local function setStatus(text)
+    if statusLabel then
+        statusLabel.Text = "Status: " .. text
+    end
 end
 
--- "Mythic" and "Mythical" both work in the rarity list
-local function wantsRarity(rarity)
-    if contains(wantedRarities, rarity) then return true end
-    return rarity == "Mythical" and contains(wantedRarities, "Mythic")
+local function notify(title, text)
+    task.spawn(function()
+        ui:Notify({
+            Title = title,
+            Text = text,
+            Duration = 3,
+            StartPosition = UDim2.new(1, 0, 0.776, 0),
+            EndPosition = UDim2.new(0.724, 0, 0.776, 0),
+            TweenTime = 0.5,
+        })
+    end)
 end
 
+----------------------------------------------------------------------
+-- WEBHOOK
+----------------------------------------------------------------------
+-- returns true on success, or false + a reason
 local function sendWebhook(embed)
-    if not webhookUrl or webhookUrl == "" or not httpRequest then return end
-    pcall(function()
-        httpRequest({
+    if webhookUrl == "" then return false, "no webhook set" end
+    if not httpRequest then return false, "executor has no request function" end
+    local ok, response = pcall(function()
+        return httpRequest({
             Url = webhookUrl,
             Method = "POST",
             Headers = { ["content-type"] = "application/json" },
             Body = HttpService:JSONEncode({ embeds = { embed } }),
         })
     end)
-end
-
-local function invoke(action, args)
-    return ReplicatedStorage.Replicator:InvokeServer("FruitsHandler", action, args)
+    if not ok then return false, tostring(response) end
+    local code = type(response) == "table" and (response.StatusCode or response.status_code)
+    if code and (code < 200 or code >= 300) then
+        return false, "HTTP " .. tostring(code)
+    end
+    return true
 end
 
 ----------------------------------------------------------------------
--- MAIN
+-- SPIN LOOP
 ----------------------------------------------------------------------
-local gemsStart = data.Gems.Value
-local spinsStart = math.floor(gemsStart / SPIN_COST)
+local function toSet(list, normalizer)
+    local set = {}
+    for _, v in pairs(list) do
+        set[normalizer(v)] = true
+    end
+    return set
+end
 
-invoke("SwitchSlot", { Slot = slot })
+local function spinLoop(myRun)
+    local slot = slotNumber
+    local gemsStart = data.Gems.Value
+    local cost = SPIN_COST
 
-local found = false
-repeat
-    task.wait(SPIN_DELAY)
-    invoke("Spin", {})
+    if gemsStart < cost then
+        running = false
+        setStatus("not enough gems")
+        notify("Fruit Spinner", "Not enough gems to spin")
+        return
+    end
 
-    local inGameName = data.Slots[tostring(slot)].Value
-    local info = fruitByName[inGameName]
-    local official = info and info.official or inGameName
-    local rarity = info and info.rarity or "Unknown"
+    local spinsStart = math.floor(gemsStart / cost)
+    invoke("SwitchSlot", { Slot = slot })
 
-    local gemsLeft = data.Gems.Value
-    local spinsLeft = math.floor(gemsLeft / SPIN_COST)
-    local gemsSpent = gemsStart - gemsLeft
-    local spinsSpent = spinsStart - spinsLeft
+    local spins = 0
+    while running and runId == myRun do
+        task.wait(SPIN_DELAY)
+        if not (running and runId == myRun) then return end -- stopped while waiting
 
-    print("You got " .. official .. " [In-game name:" .. inGameName .. ",Rarity:" .. rarity .. "]")
+        local gemsBefore = data.Gems.Value
+        invoke("Spin", {})
+        spins = spins + 1
 
-    sendWebhook({
-        title = "You Opened a New Fruit!!!",
-        color = RARITY_COLORS[rarity] or 0xffffff,
-        image = info and { url = info.image } or nil,
-        description = "**Slot : " .. tostring(slot)
-            .. "\nOfficial name: " .. official
+        local inGameName = tostring(data.Slots[tostring(slot)].Value)
+        local gemsLeft = data.Gems.Value
+        if spins == 1 and gemsBefore - gemsLeft > 0 then
+            cost = gemsBefore - gemsLeft -- use what the game actually charged
+        end
+
+        local info = FRUIT_INFO[norm(inGameName)]
+        local rarity = info and info.rarity or "Unknown"
+        local official = OFFICIAL[inGameName]
+        local spinsLeft = math.floor(gemsLeft / cost)
+        local gemsSpent = gemsStart - gemsLeft
+        local spinsSpent = math.floor(gemsSpent / cost)
+
+        print("You got " .. inGameName .. " [Rarity:" .. rarity .. "]")
+        setStatus("spin " .. spins .. " - got " .. inGameName .. " (" .. rarity .. "), " .. gemsLeft .. " gems left")
+
+        local description = "**Slot : " .. tostring(slot)
+        if official then
+            description = description .. "\nOfficial name: " .. official
+        end
+        description = description
             .. "\nIn-game name: " .. inGameName
             .. "\nRarity: " .. rarity
             .. "\nOriginal Gems: " .. gemsStart
@@ -178,11 +307,182 @@ repeat
             .. "\nGems Left: " .. gemsLeft
             .. "\nSpin Left: " .. spinsLeft
             .. "\nGems Spent: " .. gemsSpent
-            .. "\nSpin Spent: " .. spinsSpent .. "**",
-    })
+            .. "\nSpin Spent: " .. spinsSpent .. "**"
 
-    found = contains(wantedFruits, inGameName) or wantsRarity(rarity)
-until found or gemsLeft < SPIN_COST
+        task.spawn(sendWebhook, {
+            title = "You Opened a New Fruit!!!",
+            color = RARITY_COLORS[rarity] or 0xffffff,
+            description = description,
+        })
 
-print("Script has stopped")
-sendWebhook({ title = "Script has stopped", color = 0xffffff })
+        -- check against whatever is selected right now
+        local fruitSet = toSet(wantedFruits, norm)
+        local raritySet = toSet(wantedRarities, normRarity)
+        local reason = nil
+        if fruitSet[norm(inGameName)] then
+            reason = "got " .. inGameName
+        elseif info and raritySet[norm(info.rarity)] then
+            reason = "got " .. inGameName .. " (" .. rarity .. ")"
+        elseif not info and stopOnUnknown then
+            reason = "got an unknown fruit: " .. inGameName
+        elseif gemsLeft < cost then
+            reason = "out of gems"
+        end
+
+        if reason then
+            running = false
+            setStatus("stopped, " .. reason)
+            notify("Fruit Spinner stopped", reason)
+            print("Script has stopped")
+            task.spawn(sendWebhook, { title = "Script has stopped", description = reason, color = 0xffffff })
+            return
+        end
+    end
+end
+
+local function startSpinning()
+    if running then return end
+    running = true
+    runId = runId + 1
+    local myRun = runId
+    setStatus("spinning...")
+
+    task.spawn(function()
+        local ok, err = pcall(spinLoop, myRun)
+        if not ok then
+            running = false
+            setStatus("error - " .. tostring(err))
+            notify("Fruit Spinner error", tostring(err))
+        end
+        -- finished on its own (not turned off by hand): flip the switch back
+        if runId == myRun and autoToggle then
+            autoToggle:Set(false)
+        end
+    end)
+end
+
+local function stopSpinning()
+    if not running then return end
+    running = false
+    runId = runId + 1 -- lets a loop that's mid-wait know it should quit
+    setStatus("stopped")
+end
+
+----------------------------------------------------------------------
+-- CONTROLS
+----------------------------------------------------------------------
+statusLabel = ui:AddLabel("Status: idle")
+statusLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+autoToggle = ui:AddToggle({
+    Text = "Auto Spin",
+    Default = false,
+    SavingEnabled = false,
+    Callback = function(state)
+        if state then
+            startSpinning()
+        else
+            stopSpinning()
+        end
+    end,
+})
+
+ui:AddTextBox({
+    Text = "Fruit Slot",
+    Default = tostring(slotNumber),
+    Placeholder = "1",
+    SavingEnabled = false,
+    Callback = function(text)
+        local n = tonumber(text)
+        if n and n >= 1 then
+            slotNumber = math.floor(n)
+        else
+            notify("Fruit Spinner", "Slot has to be a number")
+        end
+    end,
+})
+
+ui:AddMultiDropdown({
+    Text = "Wanted Fruits",
+    Options = FRUIT_NAMES,
+    Default = presetFruits,
+    SavingEnabled = false,
+    Callback = function(selected)
+        wantedFruits = selected
+    end,
+})
+
+ui:AddMultiDropdown({
+    Text = "Stop at Rarity",
+    Options = RARITIES,
+    Default = presetRarities,
+    SavingEnabled = false,
+    Callback = function(selected)
+        wantedRarities = selected
+    end,
+})
+
+ui:AddToggle({
+    Text = "Stop on Unknown Fruit",
+    Default = true,
+    SavingEnabled = false,
+    Callback = function(state)
+        stopOnUnknown = state
+    end,
+})
+
+ui:AddTextBox({
+    Text = "Webhook URL",
+    Default = webhookUrl,
+    Placeholder = "https://discord.com/api/webhooks/...",
+    SavingEnabled = false,
+    Callback = function(text)
+        webhookUrl = (text or ""):gsub("%s", "")
+    end,
+})
+
+ui:AddButton({
+    Text = "Test Webhook",
+    Callback = function()
+        task.spawn(function()
+            local ok, reason = sendWebhook({
+                title = "Webhook test",
+                description = "Fruit Spinner can reach this webhook.",
+                color = 0xffffff,
+            })
+            if ok then
+                notify("Webhook", "Test message sent")
+            else
+                notify("Webhook failed", tostring(reason))
+            end
+        end)
+    end,
+})
+
+-- bold ON/OFF text on every toggle
+for _, child in ipairs(ui.ScrollingFrame:GetChildren()) do
+    local btn = child:FindFirstChild("ToggleButton")
+    if btn then
+        btn.Font = Enum.Font.GothamBold
+    end
+end
+
+-- key boxes (the Toggle UI key in Settings): hug the text, grow leftwards from the right edge
+for _, box in ipairs(ui.SettingScrollingFrame:GetDescendants()) do
+    if box.Name == "BindDisplay" and box:IsA("TextButton") then
+        box.AutomaticSize = Enum.AutomaticSize.X
+        box.Size = UDim2.new(0, 0, 0, 22)
+        box.TextXAlignment = Enum.TextXAlignment.Right
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 8)
+        pad.PaddingRight = UDim.new(0, 8)
+        pad.Parent = box
+    end
+end
+
+-- no outlines on text (the library's UIStroke traces the letters on text objects)
+for _, d in ipairs(ui.ScreenGui:GetDescendants()) do
+    if d:IsA("UIStroke") and (d.Parent:IsA("TextLabel") or d.Parent:IsA("TextButton") or d.Parent:IsA("TextBox")) then
+        d:Destroy()
+    end
+end
