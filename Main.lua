@@ -4,12 +4,45 @@
 -- (the old script used them): fruitslot, fruits, rarity, webhookslink
 
 ----------------------------------------------------------------------
+-- SAVED SETTINGS
+----------------------------------------------------------------------
+-- Settings are kept in a small file in your executor's workspace folder and loaded on start.
+-- (Whether Auto Spin is on is never saved.)
+local HttpService = game:GetService("HttpService")
+local SAVE_FILE = "WvoxuFruitSpinner.json"
+local saved = {}
+local canSave = (writefile and readfile and isfile) ~= nil
+if canSave and isfile(SAVE_FILE) then
+    local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(SAVE_FILE)) end)
+    if ok and type(decoded) == "table" then
+        saved = decoded
+    end
+end
+
+local uiKey = Enum.KeyCode.RightShift
+if type(saved.uiKey) == "string" then
+    local ok, key = pcall(function() return Enum.KeyCode[saved.uiKey] end)
+    if ok and key then uiKey = key end
+end
+local saveSettings = function() end -- replaced once the UI exists
+
+----------------------------------------------------------------------
 -- LOADING THE UI LIBRARY
 ----------------------------------------------------------------------
 local function safeloadstring(url)
     local source = game:HttpGet(url)
-    -- RightShift hides/shows the window (library default is F3)
-    source = source:gsub("Enum%.KeyCode%.F3", "Enum.KeyCode.RightShift", 1)
+    -- Key for hiding/showing the window: saved key, else RightShift (library default is F3).
+    -- ChangedCallback reports rebinds back to this script so they can be saved.
+    do
+        local a, b = source:find("Default = Enum.KeyCode.F3,", 1, true)
+        if a then
+            source = source:sub(1, a - 1)
+                .. "Default = Enum.KeyCode." .. uiKey.Name .. ","
+                .. " ChangedCallback = function(k) local g = (getgenv and getgenv()) or _G;"
+                .. " if g.__WvoxuFS_SaveUiKey then g.__WvoxuFS_SaveUiKey(k) end end,"
+                .. source:sub(b + 1)
+        end
+    end
     -- skip the logo intro (and the wait that comes with it)
     source = source:gsub("self:Intro%(%)%s*task%.wait%(1%)", "", 1)
     -- remove the F2 "hide whole GUI" keybind so RightShift is the only UI toggle
@@ -122,7 +155,6 @@ end
 ----------------------------------------------------------------------
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local data = player:WaitForChild("MAIN_DATA")
@@ -145,25 +177,27 @@ local env = sharedEnv
 
 local running = false
 local runId = 0
-local slotNumber = tonumber(env.fruitslot) or 1
+local slotNumber = tonumber(env.fruitslot) or tonumber(saved.slot) or 1
 local wantedFruits = {}
 local wantedRarities = {}
-local stopOnUnknown = true
-local webhookUrl = ""
+local stopOnUnknown = saved.stopOnUnknown ~= false
+local webhookUrl = type(saved.webhook) == "string" and saved.webhook or ""
 if type(env.webhookslink) == "string" and env.webhookslink ~= "link here" then
     webhookUrl = env.webhookslink
 end
 
--- pre-fill from the old globals, if they were set
+-- pre-fill: the old globals if they were set, otherwise whatever was saved last time
 local presetFruits, presetRarities = {}, {}
-if type(env.fruits) == "table" then
-    for _, name in pairs(env.fruits) do
+local fruitSource = (type(env.fruits) == "table" and env.fruits) or (type(saved.fruits) == "table" and saved.fruits) or {}
+local raritySource = (type(env.rarity) == "table" and env.rarity) or (type(saved.rarities) == "table" and saved.rarities) or {}
+do
+    for _, name in pairs(fruitSource) do
         local info = FRUIT_INFO[norm(name)]
         table.insert(presetFruits, info and info.name or tostring(name))
     end
 end
-if type(env.rarity) == "table" then
-    for _, r in pairs(env.rarity) do
+do
+    for _, r in pairs(raritySource) do
         for _, canonical in ipairs(RARITIES) do
             if normRarity(r) == norm(canonical) then
                 table.insert(presetRarities, canonical)
@@ -187,6 +221,33 @@ local ui = UILibrary.Main.new({
     NotifcationSound = "", -- silent notifications
 })
 ui:CreateUI()
+
+local ready = false -- settings are only written once the UI has finished loading
+
+local function copyList(t)
+    local c = {}
+    for _, v in ipairs(t) do table.insert(c, v) end
+    return c
+end
+
+saveSettings = function()
+    if not (canSave and ready) then return end
+    pcall(function()
+        writefile(SAVE_FILE, HttpService:JSONEncode({
+            slot = slotNumber,
+            fruits = copyList(wantedFruits),
+            rarities = copyList(wantedRarities),
+            stopOnUnknown = stopOnUnknown,
+            webhook = webhookUrl,
+            uiKey = uiKey.Name,
+        }))
+    end)
+end
+
+sharedEnv.__WvoxuFS_SaveUiKey = function(newKey)
+    uiKey = newKey
+    saveSettings()
+end
 
 sharedEnv.__WvoxuFruitSpinnerCleanup = function()
     running = false
@@ -410,6 +471,7 @@ ui:AddTextBox({
         local n = tonumber(text)
         if n and n >= 1 then
             slotNumber = math.floor(n)
+            saveSettings()
         else
             notify("Fruit Spinner", "Slot has to be a number")
         end
@@ -423,6 +485,7 @@ ui:AddMultiDropdown({
     SavingEnabled = false,
     Callback = function(selected)
         wantedFruits = selected
+        saveSettings()
     end,
 })
 
@@ -433,15 +496,17 @@ ui:AddMultiDropdown({
     SavingEnabled = false,
     Callback = function(selected)
         wantedRarities = selected
+        saveSettings()
     end,
 })
 
 ui:AddToggle({
     Text = "Stop on Unknown Fruit",
-    Default = true,
+    Default = stopOnUnknown,
     SavingEnabled = false,
     Callback = function(state)
         stopOnUnknown = state
+        saveSettings()
     end,
 })
 
@@ -452,6 +517,7 @@ ui:AddTextBox({
     SavingEnabled = false,
     Callback = function(text)
         webhookUrl = (text or ""):gsub("%s", "")
+        saveSettings()
     end,
 })
 
@@ -500,3 +566,6 @@ for _, d in ipairs(ui.ScreenGui:GetDescendants()) do
         d:Destroy()
     end
 end
+
+-- everything is built: from now on, changes get saved
+ready = true
