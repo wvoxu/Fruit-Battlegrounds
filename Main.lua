@@ -129,6 +129,14 @@ local OFFICIAL = {
     Leopard = "Neko Neko no Mi, Model: Leopard", Dough = "Mochi Mochi no Mi",
     Dragon = "Uo Uo no Mi, Model: Seiryu", Lightning = "Goro Goro no Mi", Ope = "Ope Ope no Mi",
     Venom = "Doku Doku no Mi", Nika = "Hito Hito no Mi, Model: Nika",
+    Love = "Mero Mero no Mi", Snow = "Yuki Yuki no Mi", Soul = "Soru Soru no Mi",
+    Okuchi = "Inu Inu no Mi, Model: Okuchi no Makami",
+    DarkxQuake = "Yami Yami no Mi + Gura Gura no Mi (Blackbeard's fruits)",
+    Impact = "Garp's Fighting Style",
+    DragonV2 = "Uo Uo no Mi, Model: Seiryu (V2)", DoughV2 = "Mochi Mochi no Mi (V2)",
+    LeopardV2 = "Neko Neko no Mi, Model: Leopard (V2)", OpeV2 = "Ope Ope no Mi (V2)",
+    MagmaV2 = "Magu Magu no Mi (V2)", IceV2 = "Hie Hie no Mi (V2)",
+    LightV2 = "Pika Pika no Mi (V2)", FlameV2 = "Mera Mera no Mi (V2)",
 }
 
 -- lowercase, no spaces/dashes: "Dragon V2" and "DragonV2" both match
@@ -215,7 +223,7 @@ for _, v in ipairs(presetRarities) do table.insert(wantedRarities, v) end
 ----------------------------------------------------------------------
 local ui = UILibrary.Main.new({
     TitleText = "Fruit Spinner (by wvoxu)",
-    Size = UDim2.new(0, 300, 0, 410),
+    Size = UDim2.new(0, 300, 0, 440),
     Position = UDim2.new(0.5, -150, 0.5, -190),
     Theme = "Ghost",
     KeySystemEnabled = false,
@@ -280,9 +288,17 @@ ui.UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 local statusLabel
 local autoToggle
 
-local function setStatus(text)
+local lastInfo = {} -- the Spin / Got / Gems lines under the status, kept until the next run starts
+local function setStatus(text, info)
+    if info ~= nil then
+        lastInfo = info
+    end
     if statusLabel then
-        statusLabel.Text = "Status: " .. text
+        local lines = { "Status: " .. text }
+        for _, line in ipairs(lastInfo) do
+            table.insert(lines, line)
+        end
+        statusLabel.Text = table.concat(lines, "\n")
     end
 end
 
@@ -392,7 +408,11 @@ local function spinLoop(myRun)
         local spinsSpent = math.floor(gemsSpent / cost)
 
         print("You got " .. inGameName .. " [Rarity:" .. rarity .. "]")
-        setStatus("Spin " .. spins .. ": Got " .. inGameName .. " (" .. rarity .. ")\n" .. gemsLeft .. " gems left")
+        setStatus("Spinning...", {
+            "Spin: " .. spins,
+            "Got: " .. inGameName .. " (" .. rarity .. ")",
+            "Gems left: " .. gemsLeft .. " (" .. spinsLeft .. " spins)",
+        })
 
         local description = "**Slot : " .. tostring(slot)
         if official then
@@ -444,7 +464,7 @@ local function startSpinning()
     running = true
     runId = runId + 1
     local myRun = runId
-    setStatus("Spinning...")
+    setStatus("Spinning...", {})
 
     task.spawn(function()
         local ok, err = pcall(spinLoop, myRun)
@@ -472,10 +492,10 @@ end
 ----------------------------------------------------------------------
 statusLabel = ui:AddLabel("Status: Idle")
 statusLabel.TextXAlignment = Enum.TextXAlignment.Center
--- long status lines wrap onto a second line instead of being cut off at both edges
+-- a long status line wraps instead of being cut off instead of being cut off at both edges
 statusLabel.TextWrapped = true
 statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
-statusLabel.Size = UDim2.new(1, -24, 0, 36)
+statusLabel.Size = UDim2.new(1, -24, 0, 76)
 
 autoToggle = ui:AddToggle({
     Text = "Auto Spin",
