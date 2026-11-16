@@ -46,6 +46,14 @@ local function safeloadstring(url)
     return nil
 end
 
+-- If this script was already run, shut the old copy down first (otherwise its window and spin
+-- loop keep going in the background next to the new ones).
+local sharedEnv = (getgenv and getgenv()) or _G
+if sharedEnv.__WvoxuFruitSpinnerCleanup then
+    pcall(sharedEnv.__WvoxuFruitSpinnerCleanup)
+    sharedEnv.__WvoxuFruitSpinnerCleanup = nil
+end
+
 local UILibrary = safeloadstring("https://raw.githubusercontent.com/SugaBlaz/UI-Library/refs/heads/main/Orbital%20UI.lua")
 
 ----------------------------------------------------------------------
@@ -133,7 +141,7 @@ end
 ----------------------------------------------------------------------
 -- STATE
 ----------------------------------------------------------------------
-local env = (getgenv and getgenv()) or _G
+local env = sharedEnv
 
 local running = false
 local runId = 0
@@ -179,6 +187,12 @@ local ui = UILibrary.Main.new({
     NotifcationSound = "", -- silent notifications
 })
 ui:CreateUI()
+
+sharedEnv.__WvoxuFruitSpinnerCleanup = function()
+    running = false
+    runId = runId + 1 -- a loop that's mid-wait sees this and quits
+    pcall(function() ui.ScreenGui:Destroy() end)
+end
 
 ui.Colors.ToggleColorOFF = Color3.fromRGB(255, 95, 95)
 ui.Colors.ToggleColorON = Color3.fromRGB(95, 230, 130)
