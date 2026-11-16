@@ -392,7 +392,7 @@ local function spinLoop(myRun)
         local spinsSpent = math.floor(gemsSpent / cost)
 
         print("You got " .. inGameName .. " [Rarity:" .. rarity .. "]")
-        setStatus("Spin " .. spins .. ": Got " .. inGameName .. " (" .. rarity .. "), " .. gemsLeft .. " gems left")
+        setStatus("Spin " .. spins .. ": Got " .. inGameName .. " (" .. rarity .. ")\n" .. gemsLeft .. " gems left")
 
         local description = "**Slot : " .. tostring(slot)
         if official then
@@ -472,6 +472,10 @@ end
 ----------------------------------------------------------------------
 statusLabel = ui:AddLabel("Status: Idle")
 statusLabel.TextXAlignment = Enum.TextXAlignment.Center
+-- long status lines wrap onto a second line instead of being cut off at both edges
+statusLabel.TextWrapped = true
+statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
+statusLabel.Size = UDim2.new(1, -24, 0, 36)
 
 autoToggle = ui:AddToggle({
     Text = "Auto Spin",
