@@ -521,6 +521,21 @@ ui:AddTextBox({
     end,
 })
 
+-- keep a long webhook link inside its box: cut it off with "..." instead of spilling past the edges
+do
+    local frame = ui.ScrollingFrame:FindFirstChild("TextBox_Webhook URL")
+    local box = frame and frame:FindFirstChild("TextBox")
+    if box then
+        box.ClipsDescendants = true
+        box.TextTruncate = Enum.TextTruncate.AtEnd
+        box.TextXAlignment = Enum.TextXAlignment.Left
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 8)
+        pad.PaddingRight = UDim.new(0, 8)
+        pad.Parent = box
+    end
+end
+
 ui:AddButton({
     Text = "Test Webhook",
     Callback = function()
