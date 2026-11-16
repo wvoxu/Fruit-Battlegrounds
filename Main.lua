@@ -129,7 +129,7 @@ local OFFICIAL = {
     Leopard = "Neko Neko no Mi, Model: Leopard", Dough = "Mochi Mochi no Mi",
     Dragon = "Uo Uo no Mi, Model: Seiryu", Lightning = "Goro Goro no Mi", Ope = "Ope Ope no Mi",
     Venom = "Doku Doku no Mi", Nika = "Hito Hito no Mi, Model: Nika",
-    Love = "Mero Mero no Mi", Snow = "Yuki Yuki no Mi", Soul = "Soru Soru no Mi",
+    Ash = "Hai Hai no Mi", Love = "Mero Mero no Mi", Snow = "Yuki Yuki no Mi", Soul = "Soru Soru no Mi",
     Okuchi = "Inu Inu no Mi, Model: Okuchi no Makami",
     DarkxQuake = "Yami Yami no Mi + Gura Gura no Mi",
     Impact = "Garp's fighting style",
