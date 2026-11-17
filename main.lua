@@ -3,14 +3,13 @@
 -- Pick everything in the window. Optional: set these globals before running to pre-fill it
 -- (the old script used them): fruitslot, fruits, rarity, webhookslink
 
--- UI LIBRARY: loaded from this link (the "main.lua" of your UI Library repo). Change it if the repo is named differently.
+-- UI library link (main.lua in the repo). Change it if the repo name is different.
 local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lua"
 
 ----------------------------------------------------------------------
 -- SAVED SETTINGS
 ----------------------------------------------------------------------
--- Settings are kept in a small file in your executor's workspace folder and loaded on start.
--- (Whether Auto Spin is on is never saved. The theme and menu key are saved by the UI itself.)
+-- Saving is handled by the UI (Settings > Configs). Auto Spin on/off is never saved.
 local HttpService = game:GetService("HttpService")
 local SAVE_FILE = "WvoxuFruitSpinner.json"
 local saved = HttpService:JSONDecode("{}") -- (decoded this way so editors treat it as a flexible table)
@@ -204,8 +203,7 @@ local function copyList(t)
     return c
 end
 
--- Settings are saved by the UI itself now (Settings > Configs: Autosave / Autoload).
--- The old settings file is only read once, to fill in the first "Default" config.
+-- Saving is handled by the UI. The old json file is only read once to fill the first Default config.
 saveSettings = function() end
 
 sharedEnv.__WvoxuFruitSpinnerCleanup = function()
@@ -419,7 +417,7 @@ local spinGroup = Tab:Group("Spin")
 
 autoToggle = spinGroup:Toggle({
     Name = "Auto Spin",
-    Description = "Spins until you get a fruit or rarity you picked.",
+    Description = "Keeps spinning until you land a fruit or rarity you picked.",
     Default = false,
     Callback = function(state)
         if state then
@@ -433,7 +431,7 @@ autoToggle = spinGroup:Toggle({
 spinGroup:Toggle({
     Name = "Fast Spin",
     Flag = "fastSpin",
-    Description = "Uses the fast spin, about 5x quicker.",
+    Description = "Faster spin, about 5x quicker.",
     Default = fastSpin,
     Callback = function(state)
         fastSpin = state
@@ -457,7 +455,7 @@ spinGroup:Input({
     end,
 })
 
-local targetGroup = Tab:Group({ Name = "Stop when you get", Description = "It also won't spin if the slot already has one of these." })
+local targetGroup = Tab:Group({ Name = "Stop when you get", Description = "Won't spin if your slot already has one of these." })
 
 targetGroup:Dropdown({
     Name = "Wanted Fruits",
@@ -486,7 +484,7 @@ targetGroup:Dropdown({
 targetGroup:Toggle({
     Name = "Stop on Unknown Fruit",
     Flag = "stopOnUnknown",
-    Description = "Stops if you pull a fruit that isn't in the list.",
+    Description = "Stops if you pull a fruit that's not in the list.",
     Default = stopOnUnknown,
     Callback = function(state)
         stopOnUnknown = state
@@ -530,5 +528,4 @@ Window:OnUnload(function()
     runId = runId + 1
 end)
 
--- everything is built: from now on, changes get saved
 ready = true
