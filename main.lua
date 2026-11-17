@@ -3,7 +3,6 @@
 -- Pick everything in the window. Optional: set these globals before running to pre-fill it
 -- (the old script used them): fruitslot, fruits, rarity, webhookslink
 
--- UI library link (main.lua in the repo). Change it if the repo name is different.
 local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lua"
 
 ----------------------------------------------------------------------
