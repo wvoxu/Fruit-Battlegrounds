@@ -50,7 +50,8 @@ FeatherLite.Themes = {
         Knob = rgb(252, 250, 244), Hover = rgb(0, 0, 0), Danger = rgb(190, 50, 40),
         SideText = rgb(236, 230, 218), SideSub = rgb(150, 141, 128), SideField = rgb(46, 41, 36), SideFaint = rgb(112, 104, 93),
         SideSep = rgb(54, 48, 42), SideHover = rgb(255, 255, 255), SideActive = rgb(240, 96, 54),
-        Grain = 0.93, GrainColor = rgb(90, 70, 50),
+        Grain = 0.955, GrainColor = rgb(90, 70, 50),
+        SideGrain = 0.95, SideGrainColor = rgb(255, 255, 255),
     },
     Samurai = {
         Window = rgb(12, 12, 12), Sidebar = rgb(255, 235, 0), Card = rgb(21, 21, 21), Field = rgb(34, 34, 34),
@@ -67,9 +68,9 @@ FeatherLite.Themes = {
         Knob = rgb(214, 240, 248), Hover = rgb(255, 255, 255), Danger = rgb(255, 70, 120),
     },
 }
-FeatherLite.Themes.Ink.Grain = 0.89
+FeatherLite.Themes.Ink.Grain = 0.95
 FeatherLite.Themes.Ink.GrainColor = rgb(255, 255, 255)
-FeatherLite.Themes.Parchment.Grain = 0.94
+FeatherLite.Themes.Parchment.Grain = 0.96
 FeatherLite.Themes.Parchment.GrainColor = rgb(90, 70, 50)
 -- sidebar colours default to the normal ones (Journal and Samurai set their own)
 for _, t in pairs(FeatherLite.Themes) do
@@ -80,6 +81,8 @@ for _, t in pairs(FeatherLite.Themes) do
     t.SideSep = t.SideSep or t.Separator
     t.SideHover = t.SideHover or t.Hover
     t.SideActive = t.SideActive or t.Accent
+    t.SideGrain = t.SideGrain or t.Grain
+    t.SideGrainColor = t.SideGrainColor or t.GrainColor
 end
 FeatherLite.ThemeOrder = { "Ink", "Parchment", "Journal", "Samurai", "Netrunner" }
 
@@ -423,21 +426,30 @@ function FeatherLite:Window(opts)
     T(main, { BackgroundColor3 = "Window" })
     T(make("UIStroke", { Parent = main, Transparency = 0.35, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }), { Color = "Stroke" })
 
-    -- grain over everything, very faint (only themes that set Grain show it)
-    local grain = make("ImageLabel", {
-        Name = "Grain", Parent = main, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
-        ScaleType = Enum.ScaleType.Tile, TileSize = UDim2.fromOffset(96, 96), ZIndex = 60, Visible = false,
-    })
-    hook(function()
-        local img = theme.Grain and grainAsset()
+    -- grain over everything, very faint (only themes that set Grain show it). The sidebar and the page
+    -- get their own layer so a dark sidebar next to a light page can each have a grain that shows up.
+    local function grainLayer(position, size)
+        return make("ImageLabel", {
+            Name = "Grain", Parent = main, Position = position, Size = size, BackgroundTransparency = 1,
+            ScaleType = Enum.ScaleType.Tile, TileSize = UDim2.fromOffset(96, 96), ZIndex = 60, Visible = false,
+        })
+    end
+    local grainSide = grainLayer(UDim2.fromOffset(0, 0), UDim2.new(0, SIDEBAR_W, 1, 0))
+    local grainPage = grainLayer(UDim2.fromOffset(SIDEBAR_W, 0), UDim2.new(1, -SIDEBAR_W, 1, 0))
+    local function paintGrain(layer, strength, color)
+        local img = strength and grainAsset()
         if img then
-            grain.Image = img
-            grain.ImageColor3 = theme.GrainColor or rgb(255, 255, 255)
-            grain.ImageTransparency = theme.Grain
-            grain.Visible = true
+            layer.Image = img
+            layer.ImageColor3 = color or rgb(255, 255, 255)
+            layer.ImageTransparency = strength
+            layer.Visible = true
         else
-            grain.Visible = false
+            layer.Visible = false
         end
+    end
+    hook(function()
+        paintGrain(grainSide, theme.SideGrain, theme.SideGrainColor)
+        paintGrain(grainPage, theme.Grain, theme.GrainColor)
     end)
 
     local function screenFit()
