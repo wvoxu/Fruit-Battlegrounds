@@ -1,13 +1,16 @@
--- Fruit Spinner (by wvoxu)
+-- Fruit Battlegrounds auto spinner (by wvoxu), UI Library
 -- Spins your fruit slot until you land a fruit / rarity you picked, or you run out of gems.
 -- Pick everything in the window. Optional: set these globals before running to pre-fill it
 -- (the old script used them): fruitslot, fruits, rarity, webhookslink
+
+-- UI LIBRARY: loaded from this link (the "main.lua" of your UI Library repo). Change it if the repo is named differently.
+local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lua"
 
 ----------------------------------------------------------------------
 -- SAVED SETTINGS
 ----------------------------------------------------------------------
 -- Settings are kept in a small file in your executor's workspace folder and loaded on start.
--- (Whether Auto Spin is on is never saved.)
+-- (Whether Auto Spin is on is never saved. The theme and menu key are saved by the UI itself.)
 local HttpService = game:GetService("HttpService")
 local SAVE_FILE = "WvoxuFruitSpinner.json"
 local saved = HttpService:JSONDecode("{}") -- (decoded this way so editors treat it as a flexible table)
@@ -18,66 +21,7 @@ if canSave and isfile(SAVE_FILE) then
         saved = decoded
     end
 end
-
-local uiKey = Enum.KeyCode.RightShift
-if type(saved.uiKey) == "string" then
-    local ok, key = pcall(function() return Enum.KeyCode[saved.uiKey] end)
-    if ok and key then uiKey = key end
-end
 local saveSettings = function() end -- replaced once the UI exists
-
-----------------------------------------------------------------------
--- LOADING THE UI LIBRARY
-----------------------------------------------------------------------
-local function safeloadstring(url)
-    local source = game:HttpGet(url)
-    -- Key for hiding/showing the window: saved key, else RightShift (library default is F3).
-    -- ChangedCallback reports rebinds back to this script so they can be saved.
-    do
-        local a, b = source:find("Default = Enum.KeyCode.F3,", 1, true)
-        if a then
-            source = source:sub(1, a - 1)
-                .. "Default = Enum.KeyCode." .. uiKey.Name .. ","
-                .. " ChangedCallback = function(k) local g = (getgenv and getgenv()) or _G;"
-                .. " if g.__WvoxuFS_SaveUiKey then g.__WvoxuFS_SaveUiKey(k) end end,"
-                .. source:sub(b + 1)
-        end
-    end
-    -- skip the logo intro (and the wait that comes with it)
-    source = source:gsub("self:Intro%(%)%s*task%.wait%(1%)", "", 1)
-    -- remove the F2 "hide whole GUI" keybind so RightShift is the only UI toggle
-    source = source:gsub('self:AddSettingKeybind%(%{%s*Text = "Toggle SBEUI GUI".-%}%)', "", 1)
-    source = source:gsub("Toggle SBEUI Frame", "Toggle UI", 1)
-    -- no search bar row: shrink the title bar to just the title
-    source = source:gsub("self%.Config%.TitleHeight %+ 35", "self.Config.TitleHeight")
-
-    -- Notifications: theme colours, no accent strip, no countdown bar.
-    -- (The notification is a CanvasGroup, and a UIGradient on one tints everything inside it,
-    -- so the gradient is made neutral and the real colour goes on the background.)
-    local function replace(old, new)
-        local a, b = source:find(old, 1, true)
-        if a then
-            source = source:sub(1, a - 1) .. new .. source:sub(b + 1)
-        end
-    end
-    replace("config.AccentColor or Color3.fromRGB(0, 200, 255)", "config.AccentColor or self.Colors.AccentColor")
-    replace("frame.BackgroundColor3 = Color3.fromRGB(100, 100, 100)", "frame.BackgroundColor3 = self.Colors.MainFrameColor")
-    replace("Color3.fromRGB(80, 80, 90)", "Color3.fromRGB(255, 255, 255)")
-    replace("Color3.fromRGB(40, 40, 45)", "Color3.fromRGB(255, 255, 255)")
-    replace("title.TextColor3 = Color3.fromRGB(255, 255, 255)", "title.TextColor3 = self.Colors.TitleColor")
-    replace("msg.TextColor3 = Color3.fromRGB(245, 245, 245)", "msg.TextColor3 = self.Colors.LabelColor")
-    replace("closeBtn.TextColor3 = Color3.fromRGB(255, 0, 0)", "closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)")
-    replace("accent.Size = UDim2.new(0, 5, 1, 0)", "accent.Size = UDim2.new(0, 0, 1, 0)")
-    replace("progressBarBackground.BackgroundTransparency = 0.7", "progressBarBackground.BackgroundTransparency = 1")
-    replace("progressBar.BackgroundColor3 = Color3.fromRGB(255,255,255)", "progressBar.BackgroundTransparency = 1")
-
-    local func, err = loadstring(source)
-    if func then
-        return func()
-    end
-    warn("LOADSTRING FAILED: " .. tostring(err))
-    return nil
-end
 
 -- If this script was already run, shut the old copy down first (otherwise its window and spin
 -- loop keep going in the background next to the new ones).
@@ -87,7 +31,26 @@ if sharedEnv.__WvoxuFruitSpinnerCleanup then
     sharedEnv.__WvoxuFruitSpinnerCleanup = nil
 end
 
-local UILibrary = safeloadstring("https://raw.githubusercontent.com/SugaBlaz/UI-Library/refs/heads/main/Orbital%20UI.lua")
+-- The UI library (FeatherInk, a restyled copy of S2kh's FeatherLite) is built into this file for now.
+local FeatherLite
+do
+    local okGet, body = pcall(game.HttpGet, game, LIB_URL .. "?v=" .. os.time())
+    if not okGet or type(body) ~= "string" or body == "" then
+        warn("[Fruit Battlegrounds] couldn't download the UI library from " .. LIB_URL .. ": " .. tostring(body))
+        return
+    end
+    local chunk, compileError = loadstring(body)
+    if not chunk then
+        warn("[Fruit Battlegrounds] the UI library didn't compile: " .. tostring(compileError))
+        return
+    end
+    local okRun, library = pcall(chunk)
+    if not okRun or type(library) ~= "table" or not library.Window then
+        warn("[Fruit Battlegrounds] the UI library didn't give a window library: " .. tostring(library))
+        return
+    end
+    FeatherLite = library
+end
 
 ----------------------------------------------------------------------
 -- DATA
@@ -218,19 +181,20 @@ end
 for _, v in ipairs(presetFruits) do table.insert(wantedFruits, v) end
 for _, v in ipairs(presetRarities) do table.insert(wantedRarities, v) end
 
+
 ----------------------------------------------------------------------
 -- UI
 ----------------------------------------------------------------------
-local ui = UILibrary.Main.new({
-    TitleText = "Fruit Spinner (by wvoxu)",
-    Size = UDim2.new(0, 300, 0, 440),
-    Position = UDim2.new(0.5, -150, 0.5, -190),
-    Theme = "Ghost",
-    KeySystemEnabled = false,
-    SaveOnExit = false,
-    NotifcationSound = "", -- silent notifications
+local Window = FeatherLite:Window({
+    Title = "Fruit Battlegrounds",
+    Subtitle = "by wvoxu",
+    Key = Enum.KeyCode.RightShift, -- players can change it in Settings, it's remembered
+    Folder = "WvoxuFruitBattlegrounds",
+    Size = Vector2.new(720, 470),
+    Splash = false,
+    Logo = "W", -- a cursive W instead of the feather picture
+    KeepPrevious = true, -- don't close other FeatherLite scripts' windows
 })
-ui:CreateUI()
 
 local ready = false -- settings are only written once the UI has finished loading
 
@@ -240,79 +204,39 @@ local function copyList(t)
     return c
 end
 
-saveSettings = function()
-    if not (canSave and ready) then return end
-    pcall(function()
-        writefile(SAVE_FILE, HttpService:JSONEncode({
-            slot = slotNumber,
-            fruits = copyList(wantedFruits),
-            rarities = copyList(wantedRarities),
-            stopOnUnknown = stopOnUnknown,
-            fastSpin = fastSpin,
-            webhook = webhookUrl,
-            uiKey = uiKey.Name,
-        }))
-    end)
-end
-
-sharedEnv.__WvoxuFS_SaveUiKey = function(newKey)
-    uiKey = newKey
-    saveSettings()
-end
+-- Settings are saved by the UI itself now (Settings > Configs: Autosave / Autoload).
+-- The old settings file is only read once, to fill in the first "Default" config.
+saveSettings = function() end
 
 sharedEnv.__WvoxuFruitSpinnerCleanup = function()
     running = false
     runId = runId + 1 -- a loop that's mid-wait sees this and quits
-    pcall(function() ui.ScreenGui:Destroy() end)
+    pcall(function() Window:Unload(true) end)
 end
 
-ui.Colors.ToggleColorOFF = Color3.fromRGB(255, 95, 95)
-ui.Colors.ToggleColorON = Color3.fromRGB(95, 230, 130)
-ui.Colors.ToggleColor = Color3.fromRGB(18, 18, 18)
+local Tab = Window:Tab({ Name = "Spinner", Icon = "Misc" })
 
--- remove the tab column + search bar and tidy the title bar
-ui.TabScrollingFrame.Visible = false
-ui.SearchFrame.Visible = false
-ui.TitleText.Position = UDim2.new(0, 12, 0, 0)
-ui.MinimizeButton.Parent.Position = UDim2.new(1, 0, 0, 0)
-ui.SettingsBtn.Position = UDim2.new(1, -90, 0, 2.5)
+local statusGroup = Tab:Group("Status")
+local statusRow = statusGroup:Label("Status: Idle")
+local spinRow = statusGroup:Label("Spin: -")
+local gotRow = statusGroup:Label("Got: -")
+local gemsRow = statusGroup:Label("Gems left: -")
 
--- full-width content, centred
-local contentPadding = ui.ScrollingFrame:FindFirstChildOfClass("UIPadding")
-if contentPadding then
-    contentPadding.PaddingLeft = UDim.new(0, 0)
-    contentPadding.PaddingRight = UDim.new(0, 0)
-end
-ui.UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-local statusLabel
 local autoToggle
 
-local lastInfo = {} -- the Spin / Got / Gems lines under the status, kept until the next run starts
+-- setStatus("Spinning...", { "Spin: 3", "Got: Gas (Uncommon)", "Gems left: 1234 (24 spins)" })
+-- A call without the second argument keeps the last spin's lines; {} clears them.
 local function setStatus(text, info)
+    statusRow:Set("Status: " .. text)
     if info ~= nil then
-        lastInfo = info
-    end
-    if statusLabel then
-        local lines = { "Status: " .. text }
-        for _, line in ipairs(lastInfo) do
-            table.insert(lines, line)
-        end
-        statusLabel.Text = table.concat(lines, "\n")
+        spinRow:Set(info[1] or "Spin: -")
+        gotRow:Set(info[2] or "Got: -")
+        gemsRow:Set(info[3] or "Gems left: -")
     end
 end
 
 local function notify(title, text)
-    task.spawn(function()
-        ui:Notify({
-            Title = title,
-            Text = text,
-            Duration = 3,
-            StartPosition = UDim2.new(1, 0, 0.776, 0),
-            EndPosition = UDim2.new(0.724, 0, 0.776, 0),
-            TweenTime = 0.5,
-        })
-    end)
+    Window:Notify({ Title = title, Text = text, Duration = 3 })
 end
 
 ----------------------------------------------------------------------
@@ -487,20 +411,16 @@ local function stopSpinning()
     setStatus("Stopped")
 end
 
+
 ----------------------------------------------------------------------
 -- CONTROLS
 ----------------------------------------------------------------------
-statusLabel = ui:AddLabel("Status: Idle")
-statusLabel.TextXAlignment = Enum.TextXAlignment.Center
--- a long status line wraps instead of being cut off instead of being cut off at both edges
-statusLabel.TextWrapped = true
-statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
-statusLabel.Size = UDim2.new(1, -24, 0, 76)
+local spinGroup = Tab:Group("Spin")
 
-autoToggle = ui:AddToggle({
-    Text = "Auto Spin",
+autoToggle = spinGroup:Toggle({
+    Name = "Auto Spin",
+    Description = "Spins until you get a fruit or rarity you picked.",
     Default = false,
-    SavingEnabled = false,
     Callback = function(state)
         if state then
             startSpinning()
@@ -510,97 +430,90 @@ autoToggle = ui:AddToggle({
     end,
 })
 
-ui:AddTextBox({
-    Text = "Fruit Slot",
-    Default = tostring(slotNumber),
-    Placeholder = "1",
-    SavingEnabled = false,
-    Callback = function(text)
-        local n = tonumber(text)
-        if n and n >= 1 then
-            slotNumber = math.floor(n)
-            saveSettings()
-        else
-            notify("Fruit Spinner", "Slot has to be a number")
-        end
-    end,
-})
-
-ui:AddMultiDropdown({
-    Text = "Wanted Fruits",
-    Options = FRUIT_NAMES,
-    Default = presetFruits,
-    SavingEnabled = false,
-    Callback = function(selected)
-        wantedFruits = selected
-        saveSettings()
-    end,
-})
-
-ui:AddMultiDropdown({
-    Text = "Stop at Rarity",
-    Options = RARITIES,
-    Default = presetRarities,
-    SavingEnabled = false,
-    Callback = function(selected)
-        wantedRarities = selected
-        saveSettings()
-    end,
-})
-
-ui:AddToggle({
-    Text = "Fast Spin",
+spinGroup:Toggle({
+    Name = "Fast Spin",
+    Flag = "fastSpin",
+    Description = "Uses the fast spin, about 5x quicker.",
     Default = fastSpin,
-    SavingEnabled = false,
     Callback = function(state)
         fastSpin = state
         saveSettings()
     end,
 })
 
-ui:AddToggle({
-    Text = "Stop on Unknown Fruit",
+spinGroup:Input({
+    Name = "Fruit Slot",
+    Flag = "slot",
+    Placeholder = "1",
+    Default = tostring(slotNumber),
+    Numeric = true,
+    Callback = function(n)
+        if n and n >= 1 then
+            slotNumber = math.floor(n)
+            saveSettings()
+        else
+            notify("Fruit Battlegrounds", "Slot has to be a number")
+        end
+    end,
+})
+
+local targetGroup = Tab:Group({ Name = "Stop when you get", Description = "It also won't spin if the slot already has one of these." })
+
+targetGroup:Dropdown({
+    Name = "Wanted Fruits",
+    Flag = "wantedFruits",
+    Options = FRUIT_NAMES,
+    Default = presetFruits,
+    Multi = true,
+    Callback = function(selected)
+        wantedFruits = selected
+        saveSettings()
+    end,
+})
+
+targetGroup:Dropdown({
+    Name = "Stop at Rarity",
+    Flag = "wantedRarities",
+    Options = RARITIES,
+    Default = presetRarities,
+    Multi = true,
+    Callback = function(selected)
+        wantedRarities = selected
+        saveSettings()
+    end,
+})
+
+targetGroup:Toggle({
+    Name = "Stop on Unknown Fruit",
+    Flag = "stopOnUnknown",
+    Description = "Stops if you pull a fruit that isn't in the list.",
     Default = stopOnUnknown,
-    SavingEnabled = false,
     Callback = function(state)
         stopOnUnknown = state
         saveSettings()
     end,
 })
 
-ui:AddTextBox({
-    Text = "Webhook URL",
-    Default = webhookUrl,
+local hookGroup = Tab:Group("Webhook")
+
+hookGroup:Input({
+    Name = "Webhook URL",
+    Flag = "webhook",
     Placeholder = "https://discord.com/api/webhooks/...",
-    SavingEnabled = false,
+    Default = webhookUrl,
     Callback = function(text)
         webhookUrl = (text or ""):gsub("%s", "")
         saveSettings()
     end,
 })
 
--- keep a long webhook link inside its box: cut it off with "..." instead of spilling past the edges
-do
-    local frame = ui.ScrollingFrame:FindFirstChild("TextBox_Webhook URL")
-    local box = frame and frame:FindFirstChild("TextBox")
-    if box then
-        box.ClipsDescendants = true
-        box.TextTruncate = Enum.TextTruncate.AtEnd
-        box.TextXAlignment = Enum.TextXAlignment.Left
-        local pad = Instance.new("UIPadding")
-        pad.PaddingLeft = UDim.new(0, 8)
-        pad.PaddingRight = UDim.new(0, 8)
-        pad.Parent = box
-    end
-end
-
-ui:AddButton({
-    Text = "Test Webhook",
+hookGroup:Button({
+    Name = "Test Webhook",
     Callback = function()
         task.spawn(function()
             local ok, reason = sendWebhook({
                 title = "Webhook test",
-                description = "Fruit Spinner can reach this webhook.",
+                description = "Fruit Battlegrounds can reach this webhook.",
                 color = 0xffffff,
             })
             if ok then
@@ -612,33 +525,10 @@ ui:AddButton({
     end,
 })
 
--- bold ON/OFF text on every toggle
-for _, child in ipairs(ui.ScrollingFrame:GetChildren()) do
-    local btn = child:FindFirstChild("ToggleButton")
-    if btn then
-        btn.Font = Enum.Font.GothamBold
-    end
-end
-
--- key boxes (the Toggle UI key in Settings): hug the text, grow leftwards from the right edge
-for _, box in ipairs(ui.SettingScrollingFrame:GetDescendants()) do
-    if box.Name == "BindDisplay" and box:IsA("TextButton") then
-        box.AutomaticSize = Enum.AutomaticSize.X
-        box.Size = UDim2.new(0, 0, 0, 22)
-        box.TextXAlignment = Enum.TextXAlignment.Right
-        local pad = Instance.new("UIPadding")
-        pad.PaddingLeft = UDim.new(0, 8)
-        pad.PaddingRight = UDim.new(0, 8)
-        pad.Parent = box
-    end
-end
-
--- no outlines on text (the library's UIStroke traces the letters on text objects)
-for _, d in ipairs(ui.ScreenGui:GetDescendants()) do
-    if d:IsA("UIStroke") and (d.Parent:IsA("TextLabel") or d.Parent:IsA("TextButton") or d.Parent:IsA("TextBox")) then
-        d:Destroy()
-    end
-end
+Window:OnUnload(function()
+    running = false
+    runId = runId + 1
+end)
 
 -- everything is built: from now on, changes get saved
 ready = true
