@@ -43,6 +43,23 @@ FeatherLite.Themes = {
         Faint = rgb(160, 150, 134), Accent = rgb(196, 64, 28), OnAccent = rgb(255, 255, 255), Track = rgb(206, 198, 180),
         Knob = rgb(252, 250, 244), Hover = rgb(0, 0, 0), Danger = rgb(190, 50, 40),
     },
+    Journal = {
+        Window = rgb(245, 240, 228), Sidebar = rgb(30, 26, 22), Card = rgb(249, 245, 235), Field = rgb(233, 227, 212),
+        Separator = rgb(222, 214, 197), Stroke = rgb(205, 196, 178), Text = rgb(38, 32, 26), SubText = rgb(112, 102, 88),
+        Faint = rgb(160, 150, 134), Accent = rgb(214, 72, 34), OnAccent = rgb(255, 255, 255), Track = rgb(206, 198, 180),
+        Knob = rgb(252, 250, 244), Hover = rgb(0, 0, 0), Danger = rgb(190, 50, 40),
+        SideText = rgb(236, 230, 218), SideSub = rgb(150, 141, 128), SideField = rgb(46, 41, 36), SideFaint = rgb(112, 104, 93),
+        SideSep = rgb(54, 48, 42), SideHover = rgb(255, 255, 255), SideActive = rgb(240, 96, 54),
+        Grain = 0.93, GrainColor = rgb(90, 70, 50),
+    },
+    Samurai = {
+        Window = rgb(12, 12, 12), Sidebar = rgb(255, 235, 0), Card = rgb(21, 21, 21), Field = rgb(34, 34, 34),
+        Separator = rgb(40, 40, 40), Stroke = rgb(62, 62, 62), Text = rgb(255, 255, 255), SubText = rgb(160, 160, 160),
+        Faint = rgb(110, 110, 110), Accent = rgb(255, 235, 0), OnAccent = rgb(0, 0, 0), Track = rgb(60, 60, 60),
+        Knob = rgb(255, 255, 255), Hover = rgb(255, 255, 255), Danger = rgb(255, 60, 90),
+        SideText = rgb(10, 10, 10), SideSub = rgb(74, 66, 0), SideField = rgb(232, 212, 0), SideFaint = rgb(104, 94, 0),
+        SideSep = rgb(212, 194, 0), SideHover = rgb(0, 0, 0), SideActive = rgb(10, 10, 10),
+    },
     Netrunner = {
         Window = rgb(4, 10, 17), Sidebar = rgb(7, 15, 25), Card = rgb(9, 19, 31), Field = rgb(16, 30, 46),
         Separator = rgb(20, 38, 56), Stroke = rgb(30, 52, 74), Text = rgb(214, 240, 248), SubText = rgb(112, 150, 168),
@@ -50,7 +67,21 @@ FeatherLite.Themes = {
         Knob = rgb(214, 240, 248), Hover = rgb(255, 255, 255), Danger = rgb(255, 70, 120),
     },
 }
-FeatherLite.ThemeOrder = { "Ink", "Parchment", "Netrunner" }
+FeatherLite.Themes.Ink.Grain = 0.89
+FeatherLite.Themes.Ink.GrainColor = rgb(255, 255, 255)
+FeatherLite.Themes.Parchment.Grain = 0.94
+FeatherLite.Themes.Parchment.GrainColor = rgb(90, 70, 50)
+-- sidebar colours default to the normal ones (Journal and Samurai set their own)
+for _, t in pairs(FeatherLite.Themes) do
+    t.SideText = t.SideText or t.Text
+    t.SideSub = t.SideSub or t.SubText
+    t.SideField = t.SideField or t.Field
+    t.SideFaint = t.SideFaint or t.Faint
+    t.SideSep = t.SideSep or t.Separator
+    t.SideHover = t.SideHover or t.Hover
+    t.SideActive = t.SideActive or t.Accent
+end
+FeatherLite.ThemeOrder = { "Ink", "Parchment", "Journal", "Samurai", "Netrunner" }
 
 local BADGES = {
     rgb(10, 132, 255), rgb(94, 92, 230), rgb(191, 90, 242), rgb(255, 55, 95),
@@ -209,6 +240,57 @@ function FS.configs(dir)
     return names
 end
 
+-- Grain texture: a small noise PNG shipped inside this file. Needs writefile + getcustomasset
+-- (most executors have both); without them the texture is simply left out.
+local GRAIN_B64 = "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"
+local function b64decode(data)
+    if crypt and crypt.base64decode then
+        local ok, out = pcall(crypt.base64decode, data)
+        if ok and type(out) == "string" then return out end
+    end
+    if base64_decode then
+        local ok, out = pcall(base64_decode, data)
+        if ok and type(out) == "string" then return out end
+    end
+    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    local map = {}
+    for i = 1, #alphabet do map[string.byte(alphabet, i)] = i - 1 end
+    local out, n, acc = {}, 0, 0
+    for i = 1, #data do
+        local v = map[string.byte(data, i)]
+        if v then
+            acc = acc * 64 + v
+            n = n + 1
+            if n == 4 then
+                table.insert(out, string.char(math.floor(acc / 65536) % 256, math.floor(acc / 256) % 256, acc % 256))
+                n, acc = 0, 0
+            end
+        end
+    end
+    if n == 3 then
+        acc = acc * 64
+        table.insert(out, string.char(math.floor(acc / 65536) % 256, math.floor(acc / 256) % 256))
+    elseif n == 2 then
+        acc = acc * 4096
+        table.insert(out, string.char(math.floor(acc / 65536) % 256))
+    end
+    return table.concat(out)
+end
+
+local grainAssetId, grainTried
+local function grainAsset()
+    if grainTried then return grainAssetId end
+    grainTried = true
+    if not (writefile and getcustomasset) then return nil end
+    pcall(function()
+        if makefolder and not (isfolder and isfolder("FeatherInk")) then makefolder("FeatherInk") end
+        local path = "FeatherInk/grain_v1.png"
+        if not (isfile and isfile(path)) then writefile(path, b64decode(GRAIN_B64)) end
+        grainAssetId = getcustomasset(path)
+    end)
+    return grainAssetId
+end
+
 local env = (getgenv and getgenv()) or _G
 env.FeatherLiteWindows = env.FeatherLiteWindows or {}
 local registry = env.FeatherLiteWindows
@@ -286,7 +368,7 @@ function FeatherLite:Window(opts)
         local shaft = T(make("ImageLabel", {
             Parent = holder, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Image = PLUME_SHAFT,
             ScaleType = Enum.ScaleType.Fit, ZIndex = z + 1,
-        }), { ImageColor3 = "Text" })
+        }), { ImageColor3 = "SideText" })
         holder.Parent = parent
         return holder, vane, shaft
     end
@@ -341,6 +423,23 @@ function FeatherLite:Window(opts)
     T(main, { BackgroundColor3 = "Window" })
     T(make("UIStroke", { Parent = main, Transparency = 0.35, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }), { Color = "Stroke" })
 
+    -- grain over everything, very faint (only themes that set Grain show it)
+    local grain = make("ImageLabel", {
+        Name = "Grain", Parent = main, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+        ScaleType = Enum.ScaleType.Tile, TileSize = UDim2.fromOffset(96, 96), ZIndex = 60, Visible = false,
+    })
+    hook(function()
+        local img = theme.Grain and grainAsset()
+        if img then
+            grain.Image = img
+            grain.ImageColor3 = theme.GrainColor or rgb(255, 255, 255)
+            grain.ImageTransparency = theme.Grain
+            grain.Visible = true
+        else
+            grain.Visible = false
+        end
+    end)
+
     local function screenFit()
         local area = gui.AbsoluteSize
         if area.X < 2 or area.Y < 2 then return userScale end
@@ -383,7 +482,7 @@ function FeatherLite:Window(opts)
         Parent = sidebar, Position = UDim2.new(1, -12, 0, 0), Size = UDim2.new(0, 12, 1, 0), BorderSizePixel = 0,
     })
     T(sidebarFill, { BackgroundColor3 = "Sidebar" })
-    T(make("Frame", { Parent = sidebar, Position = UDim2.new(1, -1, 0, 0), Size = UDim2.new(0, 1, 1, 0), BorderSizePixel = 0, ZIndex = 3 }), { BackgroundColor3 = "Separator" })
+    T(make("Frame", { Parent = sidebar, Position = UDim2.new(1, -1, 0, 0), Size = UDim2.new(0, 1, 1, 0), BorderSizePixel = 0, ZIndex = 3 }), { BackgroundColor3 = "SideSep" })
 
     local function applyAlpha()
         main.BackgroundTransparency = alpha
@@ -427,7 +526,7 @@ function FeatherLite:Window(opts)
         Parent = sidebar, Position = UDim2.fromOffset(48, 18), Size = UDim2.new(1, -62, 0, 20),
         BackgroundTransparency = 1, Text = title, FontFace = FONTS.SerifBold, TextSize = 15, Visible = not MOBILE,
         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 4,
-    }), { TextColor3 = "Text" })
+    }), { TextColor3 = "SideText" })
     local searchY = 52
     if subtitle then
         T(make("TextLabel", {
@@ -442,18 +541,18 @@ function FeatherLite:Window(opts)
         Parent = sidebar, Position = UDim2.fromOffset(12, searchY), Size = UDim2.new(1, -24, 0, 34), ZIndex = 4,
         Visible = not MOBILE,
     }, { corner(8) })
-    T(searchField, { BackgroundColor3 = "Field" })
+    T(searchField, { BackgroundColor3 = "SideField" })
     local searchStroke = T(make("UIStroke", { Parent = searchField, Transparency = 1, Thickness = 1.5 }), { Color = "Accent" })
     T(make("ImageLabel", {
         Parent = searchField, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 9, 0.5, 0), Size = UDim2.fromOffset(14, 14),
         BackgroundTransparency = 1, Image = iconFor("Search"), ScaleType = Enum.ScaleType.Fit, ZIndex = 5,
-    }), { ImageColor3 = "SubText" })
+    }), { ImageColor3 = "SideSub" })
     local searchBox = make("TextBox", {
         Parent = searchField, Position = UDim2.fromOffset(28, 0), Size = UDim2.new(1, -34, 1, 0),
         BackgroundTransparency = 1, Text = "", PlaceholderText = "Search", ClearTextOnFocus = false,
         FontFace = FONTS.Regular, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 5,
     })
-    T(searchBox, { TextColor3 = "Text", PlaceholderColor3 = "Faint" })
+    T(searchBox, { TextColor3 = "SideText", PlaceholderColor3 = "SideFaint" })
     on(searchBox.Focused, function() tw(searchStroke, 0.2, { Transparency = 0.2 }) end)
     on(searchBox.FocusLost, function() tw(searchStroke, 0.25, { Transparency = 1 }) end)
 
@@ -467,11 +566,11 @@ function FeatherLite:Window(opts)
         Parent = tabScroll, Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -20, 0, ROW_H),
         BorderSizePixel = 0, BackgroundTransparency = 1, ZIndex = 4,
     }, { corner(7) })
-    T(highlight, { BackgroundColor3 = "Accent" })
+    T(highlight, { BackgroundColor3 = "SideActive" })
     T(make("Frame", {
         Parent = highlight, Position = UDim2.fromOffset(-10, 6), Size = UDim2.new(0, 3, 1, -12),
         BorderSizePixel = 0, ZIndex = 5,
-    }, { corner("full") }), { BackgroundColor3 = "Accent" })
+    }, { corner("full") }), { BackgroundColor3 = "SideActive" })
     local tabHolder = make("Frame", {
         Parent = tabScroll, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1, ZIndex = 5,
@@ -480,16 +579,16 @@ function FeatherLite:Window(opts)
 
     T(make("Frame", {
         Parent = sidebar, Position = UDim2.new(0, 12, 1, MOBILE and -62 or -56), Size = UDim2.new(1, -24, 0, 1), BorderSizePixel = 0, ZIndex = 4,
-    }), { BackgroundColor3 = "Separator" })
+    }), { BackgroundColor3 = "SideSep" })
     local settingsRow = make("TextButton", {
         Parent = sidebar, Position = UDim2.new(0, 10, 1, MOBILE and -54 or -48), Size = UDim2.new(1, -20, 0, MOBILE and 46 or 40),
         Text = "", AutoButtonColor = false, BackgroundTransparency = 1, ZIndex = 4,
     }, { corner(7) })
-    T(settingsRow, { BackgroundColor3 = "Accent" })
+    T(settingsRow, { BackgroundColor3 = "SideActive" })
     local settingsBar = T(make("Frame", {
         Parent = settingsRow, Position = UDim2.fromOffset(-10, 6), Size = UDim2.new(0, 3, 1, -12),
         BorderSizePixel = 0, BackgroundTransparency = 1, ZIndex = 6,
-    }, { corner("full") }), { BackgroundColor3 = "Accent" })
+    }, { corner("full") }), { BackgroundColor3 = "SideActive" })
 
     local content = make("Frame", {
         Parent = main, Position = UDim2.fromOffset(SIDEBAR_W, 0), Size = UDim2.new(1, -SIDEBAR_W, 1, 0),
@@ -975,17 +1074,17 @@ function FeatherLite:Window(opts)
 
     local function refreshTabColors(animate)
         for _, t in ipairs(tabs) do
-            local col = (t == current) and theme.Accent or theme.Text
+            local col = (t == current) and theme.SideActive or theme.SideText
             if animate then tw(t.label, 0.25, { TextColor3 = col }) else t.label.TextColor3 = col end
             if t.icon then
-                local ic = (t == current) and theme.Accent or theme.SubText
+                local ic = (t == current) and theme.SideActive or theme.SideSub
                 if animate then tw(t.icon, 0.25, { ImageColor3 = ic }) else t.icon.ImageColor3 = ic end
             end
         end
         if settingsTab then
             local sel = current == settingsTab
-            local col = sel and theme.Accent or theme.Text
-            local ic = sel and theme.Accent or theme.SubText
+            local col = sel and theme.SideActive or theme.SideText
+            local ic = sel and theme.SideActive or theme.SideSub
             if animate then
                 tw(settingsTab.label, 0.25, { TextColor3 = col })
                 tw(settingsRow, 0.25, { BackgroundTransparency = sel and 0.88 or 1 })
@@ -1182,7 +1281,7 @@ function FeatherLite:Window(opts)
                 FontFace = FONTS.Semi, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
                 TextYAlignment = Enum.TextYAlignment.Bottom, LayoutOrder = #sideItems + 1, ZIndex = 5,
             }, { pad(0, 0, 4, 8) })
-            T(h, { TextColor3 = "Faint" })
+            T(h, { TextColor3 = "SideFaint" })
             table.insert(sideItems, { inst = h, height = 26, header = {} })
         end
         tab.groupName = o.Group
@@ -1196,7 +1295,7 @@ function FeatherLite:Window(opts)
             Parent = tabHolder, Size = UDim2.new(1, 0, 0, ROW_H), Text = "", AutoButtonColor = false,
             BackgroundTransparency = 1, LayoutOrder = #sideItems + 1, ZIndex = 5,
         }, { corner(7) })
-        T(btn, { BackgroundColor3 = "Hover" })
+        T(btn, { BackgroundColor3 = "SideHover" })
         local badge = make("Frame", {
             Parent = btn, AnchorPoint = MOBILE and Vector2.new(0.5, 0.5) or Vector2.new(0, 0.5),
             Position = MOBILE and UDim2.fromScale(0.5, 0.5) or UDim2.new(0, 7, 0.5, 0),
@@ -1209,19 +1308,19 @@ function FeatherLite:Window(opts)
             tab.icon = make("ImageLabel", {
                 Parent = badge, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
                 Size = MOBILE and UDim2.fromOffset(20, 20) or UDim2.fromOffset(16, 16),
-                BackgroundTransparency = 1, Image = icon, ImageColor3 = theme.SubText, ScaleType = Enum.ScaleType.Fit, ZIndex = 7,
+                BackgroundTransparency = 1, Image = icon, ImageColor3 = theme.SideSub, ScaleType = Enum.ScaleType.Fit, ZIndex = 7,
             })
         else
             make("TextLabel", {
                 Parent = badge, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
                 Text = string.upper(string.sub(tab.name, 1, 1)), FontFace = FONTS.Bold, TextSize = MOBILE and 16 or 13,
-                TextColor3 = theme.SubText, ZIndex = 7,
+                TextColor3 = theme.SideSub, ZIndex = 7,
             })
         end
         tab.label = make("TextLabel", {
             Parent = btn, Position = UDim2.fromOffset(40, 0), Size = UDim2.new(1, -46, 1, 0), BackgroundTransparency = 1,
             Visible = not MOBILE, Text = tab.name, FontFace = FONTS.Medium, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = theme.Text, ZIndex = 6,
+            TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = theme.SideText, ZIndex = 6,
         })
         tab.button = btn
         table.insert(sideItems, { inst = btn, height = ROW_H, tab = tab })
@@ -2046,14 +2145,14 @@ function FeatherLite:Window(opts)
         local gear = make("ImageLabel", {
             Parent = badge, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
             Size = MOBILE and UDim2.fromOffset(20, 20) or UDim2.fromOffset(16, 16),
-            BackgroundTransparency = 1, Image = iconFor("Settings"), ImageColor3 = theme.SubText, ScaleType = Enum.ScaleType.Fit, ZIndex = 6,
+            BackgroundTransparency = 1, Image = iconFor("Settings"), ImageColor3 = theme.SideSub, ScaleType = Enum.ScaleType.Fit, ZIndex = 6,
         })
         settingsTab.icon = gear
         local gearScale = make("UIScale", { Parent = badge })
         settingsTab.label = make("TextLabel", {
             Parent = settingsRow, Position = UDim2.fromOffset(40, 0), Size = UDim2.new(1, -46, 1, 0), BackgroundTransparency = 1,
             Visible = not MOBILE, Text = "Settings", FontFace = FONTS.Medium, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left,
-            TextColor3 = theme.Text, ZIndex = 5,
+            TextColor3 = theme.SideText, ZIndex = 5,
         })
         on(settingsRow.MouseEnter, function()
             tw(gearScale, 0.2, { Scale = 1.1 }, Enum.EasingStyle.Back)
