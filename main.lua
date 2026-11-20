@@ -230,7 +230,7 @@ local function sendWebhook(embed)
             Url = webhookUrl,
             Method = "POST",
             Headers = { ["content-type"] = "application/json" },
-            Body = HttpService:JSONEncode({ embeds = { embed } }),
+            Body = HttpService:JSONEncode({ embeds = embed[1] ~= nil and embed or { embed } }), -- one embed, or a list of up to 10
         })
     end)
     if not ok then return false, tostring(response) end
@@ -248,7 +248,8 @@ local function sendWebhook(embed)
     return true
 end
 
--- Messages go out one at a time and get retried, so a rate limit or a bad moment doesn't drop a spin
+-- Messages are sent in batches (Discord takes up to 10 embeds per request) and retried, so a rate limit
+-- or a slow moment doesn't drop a spin, and the queue can keep up with fast spinning
 local webhookQueue = {}
 local webhookWorker = false
 local function queueWebhook(embed)
@@ -257,18 +258,22 @@ local function queueWebhook(embed)
     if webhookWorker then return end
     webhookWorker = true
     task.spawn(function()
+        task.wait(0.3) -- let a few pile up
         while #webhookQueue > 0 do
-            local item = webhookQueue[1]
+            local batch = {}
+            for _ = 1, math.min(10, #webhookQueue) do
+                table.insert(batch, webhookQueue[1])
+                table.remove(webhookQueue, 1)
+            end
             local sent = false
             for attempt = 1, 6 do
-                local ok, reason, wait = sendWebhook(item)
+                local ok, reason, wait = sendWebhook(batch)
                 if ok then sent = true break end
                 if reason == "no webhook set" then break end
                 task.wait((wait or (attempt * 1.5)) + 0.2)
             end
-            if not sent then warn("[Fruit Battlegrounds] a webhook message couldn't be sent") end
-            table.remove(webhookQueue, 1)
-            task.wait(0.4)
+            if not sent then warn("[Fruit Battlegrounds] " .. #batch .. " webhook message(s) couldn't be sent") end
+            task.wait(0.25)
         end
         webhookWorker = false
     end)
