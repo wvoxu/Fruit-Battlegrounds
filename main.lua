@@ -236,9 +236,42 @@ local function sendWebhook(embed)
     if not ok then return false, tostring(response) end
     local code = type(response) == "table" and (response.StatusCode or response.status_code)
     if code and (code < 200 or code >= 300) then
-        return false, "HTTP " .. tostring(code)
+        -- Discord says how long to wait when it's rate limiting
+        local wait
+        local body = type(response) == "table" and response.Body
+        if code == 429 and type(body) == "string" then
+            local decoded = select(2, pcall(function() return HttpService:JSONDecode(body) end))
+            wait = type(decoded) == "table" and tonumber(decoded.retry_after) or nil
+        end
+        return false, "HTTP " .. tostring(code), wait
     end
     return true
+end
+
+-- Messages go out one at a time and get retried, so a rate limit or a bad moment doesn't drop a spin
+local webhookQueue = {}
+local webhookWorker = false
+local function queueWebhook(embed)
+    if webhookUrl == "" then return end
+    table.insert(webhookQueue, embed)
+    if webhookWorker then return end
+    webhookWorker = true
+    task.spawn(function()
+        while #webhookQueue > 0 do
+            local item = webhookQueue[1]
+            local sent = false
+            for attempt = 1, 6 do
+                local ok, reason, wait = sendWebhook(item)
+                if ok then sent = true break end
+                if reason == "no webhook set" then break end
+                task.wait((wait or (attempt * 1.5)) + 0.2)
+            end
+            if not sent then warn("[Fruit Battlegrounds] a webhook message couldn't be sent") end
+            table.remove(webhookQueue, 1)
+            task.wait(0.4)
+        end
+        webhookWorker = false
+    end)
 end
 
 ----------------------------------------------------------------------
@@ -331,7 +364,7 @@ local function spinLoop(myRun)
             .. "\nGems Spent: " .. gemsSpent
             .. "\nSpin Spent: " .. spinsSpent .. "**"
 
-        task.spawn(sendWebhook, {
+        queueWebhook({
             title = "You Opened a New Fruit!!!",
             color = RARITY_COLORS[rarity] or 0xffffff,
             description = description,
@@ -356,7 +389,7 @@ local function spinLoop(myRun)
             setStatus("Stopped: " .. reason)
             notify("Fruit Spinner stopped", reason)
             print("Script has stopped")
-            task.spawn(sendWebhook, { title = "Script has stopped", description = reason, color = 0xffffff })
+            queueWebhook({ title = "Script has stopped", description = reason, color = 0xffffff })
             return
         end
     end
