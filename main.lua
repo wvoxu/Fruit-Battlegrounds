@@ -1,6 +1,10 @@
 -- Fruit Battlegrounds (by wvoxu): auto spinner + skill spam in one window.
 -- The UI library is loaded from LIB_URL (main.lua in the UI Library repo); its credits are in its header.
 
+-- Link to this script (raw), so it restarts itself after moving to another world.
+-- Leave it empty if the script is in your executor's autoexec folder instead.
+local SCRIPT_URL = ""
+
 local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lua"
 
 local sharedEnv = (getgenv and getgenv()) or _G
@@ -516,7 +520,6 @@ if not ok_runSpinner then warn("[Fruit Battlegrounds] SPINNER failed: " .. tostr
 local function runSkillSpam()
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
 local skillRemote = ReplicatedStorage:WaitForChild("ReplicatorNoYield", 10) -- skills and aiming data
@@ -539,35 +542,9 @@ local enabled = false
 local useSlot = { ["1"] = true, ["2"] = true, ["3"] = true, ["4"] = true, ["5"] = true, G = false }
 local lastAttempt = {}
 
--- what each skill sends, as seen in the game's own calls. New ones are picked up when you cast them yourself.
-local learned = {
-    ["LeopardV2/FingerPistolBarrage"] = { mouseRay = true, rootCF = true, hold = 0.95 },
-    ["LeopardV2/SonicKick"] = { mouseRay = true, rootCF = false, hold = 0 },
-    ["LeopardV2/InfinityDrive"] = { mouseRay = false, rootCF = false, hold = 0 },
-    ["LeopardV2/UnrelentingAssault"] = { mouseRay = true, rootCF = false, hold = 2.5 },
-}
-local LEARN_FILE = "wvoxu/FruitBattlegrounds/learned.json"
-local canSave = (writefile and readfile and isfile) ~= nil
-if canSave and isfile(LEARN_FILE) then
-    local ok, data = pcall(function() return HttpService:JSONDecode(readfile(LEARN_FILE)) end)
-    if ok and type(data) == "table" then
-        for k, v in pairs(data) do learned[k] = v end
-    end
-end
-local function saveLearned()
-    if not canSave then return end
-    if makefolder and isfolder then
-        for _, dir in ipairs({ "wvoxu", "wvoxu/FruitBattlegrounds" }) do
-            if not isfolder(dir) then pcall(makefolder, dir) end
-        end
-    end
-    pcall(function() writefile(LEARN_FILE, HttpService:JSONEncode(learned)) end)
-end
-
 ----------------------------------------------------------------------
 -- READING THE GAME
 ----------------------------------------------------------------------
-local seenFruit -- fruit name from the last skill you cast yourself
 local function currentFruit()
     local char = LocalPlayer.Character
     local form = char and char:GetAttribute("Form")
@@ -581,7 +558,7 @@ local function currentFruit()
             end
         end
     end
-    return seenFruit
+    return nil
 end
 
 local function hotbar()
@@ -602,21 +579,12 @@ local function skillOfSlot(slot)
     return (title.Text:gsub("[^%w]", "")), btn
 end
 
-local function isHotbarSkill(name)
-    for _, slot in ipairs(SLOTS) do
-        if skillOfSlot(slot) == name then return true end
-    end
-    return false
-end
-
 ----------------------------------------------------------------------
 -- UI
 ----------------------------------------------------------------------
-local hookActive = true
 sharedEnv.__WvoxuSkillSpamCleanup = function()
     alive = false
     enabled = false
-    hookActive = false
 end
 
 local Tab = Window:Tab({ Name = "Autofarm", Icon = "Misc" })
@@ -628,6 +596,7 @@ local fruitRow = statusGroup:Label("Fruit: ...")
 local mainGroup = Tab:Group("Auto Skills")
 mainGroup:Toggle({
     Name = "Auto Skills",
+    Flag = "autoSkills", -- remembered, so farming carries on after changing worlds
     Default = false,
     Keybind = Enum.KeyCode.X,
     Callback = function(state)
@@ -647,77 +616,23 @@ for _, slot in ipairs(SLOTS) do
 end
 
 ----------------------------------------------------------------------
--- LEARNING THE SHAPE OF A SKILL FROM YOUR OWN CASTS
-----------------------------------------------------------------------
-local cast = nil
-
-local function onSkillSeen(fruit, skill, args)
-    if not isHotbarSkill(skill) then return end -- only real skills from the skill bar (not dashes etc)
-    seenFruit = fruit
-    local key = fruit .. "/" .. skill
-    local entry = learned[key] or { hold = 0 }
-    entry.mouseRay = args.MouseRay ~= nil
-    entry.rootCF = args.RootCF ~= nil
-    learned[key] = entry
-    cast = { t = os.clock(), entry = entry, updates = 0 }
-    saveLearned()
-    dbg("saw you cast " .. key)
-end
-
-local function onRemoteSeen(args)
-    local a1, a2, a3 = args[1], args[2], args[3]
-    if a1 == "ClientData" then
-        if cast then
-            if a2 == "UpdateData" then
-                cast.updates = cast.updates + 1
-            elseif a2 == "ClearData" then
-                if cast.updates > 0 then
-                    cast.entry.hold = math.floor((os.clock() - cast.t) * 100 + 0.5) / 100
-                    saveLearned()
-                end
-                cast = nil
-            end
-        end
-    elseif type(a1) == "string" and type(a2) == "string" and type(a3) == "table" then
-        onSkillSeen(a1, a2, a3)
-    end
-end
-
-local oldNamecall
-local okHook = pcall(function()
-    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-        if hookActive and method == "FireServer" and self == skillRemote and not checkcaller() then
-            local args = table.pack(...)
-            task.defer(function() pcall(onRemoteSeen, args) end)
-        end
-        return oldNamecall(self, ...)
-    end))
-end)
-if not okHook then dbg("couldn't hook remotes, using the built-in skill shapes only") end
-
-----------------------------------------------------------------------
 -- BUILDING WHAT THE GAME EXPECTS
 ----------------------------------------------------------------------
--- the same table the game's own mouse ray has: Origin, Direction, Instance, Position, Normal, Distance, Material
+-- no aiming: the ray just points straight ahead of your character, in the same shape as the game's own mouse ray
 local function buildMouseRay()
-    local cam = workspace.CurrentCamera
-    local loc = game:GetService("UserInputService"):GetMouseLocation()
-    local ray = cam:ViewportPointToRay(loc.X, loc.Y)
-    local origin, dir = ray.Origin, ray.Direction
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LocalPlayer.Character }
-    local hit = workspace:Raycast(origin, dir * 300, params)
-    local position = hit and hit.Position or (origin + dir * 300)
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local origin = root and root.Position or Vector3.zero
+    local dir = root and root.CFrame.LookVector or Vector3.new(0, 0, -1)
+    local position = origin + dir * 50
     return {
         Origin = origin,
         Direction = dir * 300,
-        Instance = hit and hit.Instance or nil,
+        Instance = nil,
         Position = position,
-        Normal = hit and hit.Normal or Vector3.new(0, 1, 0),
-        Distance = (position - origin).Magnitude,
-        Material = hit and hit.Material or Enum.Material.Air,
+        Normal = Vector3.new(0, 1, 0),
+        Distance = 50,
+        Material = Enum.Material.Air,
     }
 end
 
@@ -727,30 +642,11 @@ local function rootCFrame()
     return root and root.CFrame
 end
 
-local holding = 0 -- skills currently sending aim updates (clearing while another one is still going would cut it off)
 local function useSkill(fruit, skill)
-    local entry = learned[fruit .. "/" .. skill] or { hold = 0 }
     skillRemote:FireServer(fruit, skill, { MouseRay = buildMouseRay(), RootCF = rootCFrame() })
-
-    -- skills that keep sending your aim while they're active: do the same for as long as the real one does
-    if (entry.hold or 0) > 0 then
-        local started = os.clock()
-        holding = holding + 1
-        while alive and enabled and os.clock() - started < entry.hold do
-            task.wait(0.11)
-            skillRemote:FireServer("ClientData", "UpdateData", { RootCF = rootCFrame(), MouseRay = buildMouseRay() })
-        end
-        holding = holding - 1
-        if holding <= 0 then
-            holding = 0
-            skillRemote:FireServer("ClientData", "ClearData", {})
-        end
-    end
-    return true
 end
 
--- every frame: any skill that's off cooldown gets cast again. Each skill runs on its own,
--- so a long one (like Unrelenting Assault) doesn't hold up the others
+-- every frame: each ticked skill is cast again. Each skill runs on its own
 local busy = {}
 local CAST_GAP = 0.12 -- seconds between tries for each skill; no cooldown tracking, the server ignores early ones
 local RunService = game:GetService("RunService")
@@ -783,7 +679,20 @@ local resetOnLowStamina = true
 local resetBelow = 20
 local autoPlay = true
 local teleportOn = true
-local teleportPos = Vector3.new(-568, 640, -1338)
+-- the worlds: you can go to the next one at the level shown. Each has its own spot to teleport to.
+local WORLDS = {
+    { placeId = 9224601490,  level = 0,   spot = Vector3.new(-568, 640, -1338) },
+    { placeId = 16190471004, level = 100, spot = Vector3.new(-224, -394, -2728) },
+    { placeId = 12413901502, level = 200, spot = Vector3.new(-1924, 265, 850) },
+}
+local currentWorld = nil
+for i, w in ipairs(WORLDS) do
+    if game.PlaceId == w.placeId then currentWorld = i end
+end
+local worldSpots = {}
+for i, w in ipairs(WORLDS) do worldSpots[i] = w.spot end
+local teleportPos = worldSpots[currentWorld or 1]
+local autoWorld = true
 local keepPosition = false
 local maxDrift = 15
 
@@ -819,13 +728,20 @@ survivalGroup:Toggle({
     Default = teleportOn,
     Callback = function(state) teleportOn = state end,
 })
-local posInput = survivalGroup:Input({
-    Name = "Teleport to",
-    Flag = "teleportCoords",
-    Default = "-568.0, 640.0, -1338.0",
-    Placeholder = "-574, 746, -961",
-    Callback = function(value) teleportPos = parsePos(value) or Vector3.new(-568, 640, -1338) end,
-})
+local posInputs = {}
+local function spotText(v) return string.format("%.1f, %.1f, %.1f", v.X, v.Y, v.Z) end
+for i, w in ipairs(WORLDS) do
+    posInputs[i] = survivalGroup:Input({
+        Name = "Teleport to (World " .. i .. ")",
+        Flag = i == 1 and "teleportCoords" or ("teleportCoords" .. i),
+        Default = spotText(w.spot),
+        Placeholder = "-574, 746, -961",
+        Callback = function(value)
+            worldSpots[i] = parsePos(value) or w.spot
+            if (currentWorld or 1) == i then teleportPos = worldSpots[i] end
+        end,
+    })
+end
 survivalGroup:Button({
     Name = "Use my position",
     Callback = function()
@@ -833,7 +749,7 @@ survivalGroup:Button({
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if not root then return end
         local p = root.Position
-        posInput:Set(string.format("%.1f, %.1f, %.1f", p.X, p.Y, p.Z))
+        posInputs[currentWorld or 1]:Set(spotText(p))
     end,
 })
 survivalGroup:Toggle({
@@ -993,6 +909,63 @@ sharedEnv.__WvoxuSkillSpamCleanup = (function(prev)
         prev()
     end
 end)(sharedEnv.__WvoxuSkillSpamCleanup)
+
+----------------------------------------------------------------------
+-- WORLDS
+----------------------------------------------------------------------
+local levelRow = statusGroup:Label("Level: ?  |  World: ?")
+
+-- the level belongs to the fruit you have equipped: MAIN_DATA.Fruits.<fruit>.Level
+local function readLevel()
+    local data = LocalPlayer:FindFirstChild("MAIN_DATA")
+    local fruits = data and data:FindFirstChild("Fruits")
+    if not fruits then return nil end
+    local name
+    local slots = data:FindFirstChild("Slots")
+    local slotNumber = data:FindFirstChild("Slot")
+    local slotValue = slots and slotNumber and slots:FindFirstChild(tostring(slotNumber.Value))
+    if slotValue and slotValue.Value ~= "" then name = tostring(slotValue.Value) end
+    name = name or currentFruit()
+    local fruit = name and fruits:FindFirstChild(name)
+    local level = fruit and fruit:FindFirstChild("Level")
+    if level and tonumber(level.Value) then return tonumber(level.Value), name end
+    return nil
+end
+
+local worldGroup = Tab:Group("Worlds")
+worldGroup:Toggle({
+    Name = "Go to highest world",
+    Flag = "autoWorld",
+    Description = "World 2 at level 100, world 3 at level 200. Higher worlds give more XP.",
+    Default = autoWorld,
+    Callback = function(state) autoWorld = state end,
+})
+
+local lastWorldHop = 0
+task.spawn(function()
+    local lastText
+    while alive do
+        task.wait(2)
+        local level, fruitName = readLevel()
+        local text = string.format("Level: %s  |  World: %s", level and (level .. " (" .. tostring(fruitName) .. ")") or "?", currentWorld and tostring(currentWorld) or "?")
+        if text ~= lastText then lastText = text; levelRow:Set(text) end
+        if autoWorld and level and currentWorld and os.clock() - lastWorldHop > 20 then
+            local target = currentWorld
+            for i, w in ipairs(WORLDS) do
+                if level >= w.level then target = math.max(target, i) end
+            end
+            if target > currentWorld then
+                lastWorldHop = os.clock()
+                dbg("level " .. level .. ", going to world " .. target)
+                Window:Notify({ Title = "Changing world", Text = "Going to world " .. target, Duration = 3 })
+                if queue_on_teleport and SCRIPT_URL ~= "" then
+                    pcall(queue_on_teleport, string.format('loadstring(game:HttpGet("%s"))()', SCRIPT_URL))
+                end
+                pcall(function() game:GetService("TeleportService"):Teleport(WORLDS[target].placeId, LocalPlayer) end)
+            end
+        end
+    end
+end)
 
 -- skills that push you around: if you end up too far from the spot, go back
 task.spawn(function()
