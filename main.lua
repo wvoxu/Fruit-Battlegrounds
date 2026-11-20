@@ -784,6 +784,8 @@ local resetBelow = 20
 local autoPlay = true
 local teleportOn = true
 local teleportPos = Vector3.new(-568, 640, -1338)
+local keepPosition = false
+local maxDrift = 15
 
 local function parsePos(text)
     local nums = {}
@@ -833,6 +835,18 @@ survivalGroup:Button({
         local p = root.Position
         posInput:Set(string.format("%.1f, %.1f, %.1f", p.X, p.Y, p.Z))
     end,
+})
+survivalGroup:Toggle({
+    Name = "Keep teleporting back",
+    Flag = "keepPosition",
+    Default = keepPosition,
+    Callback = function(state) keepPosition = state end,
+})
+survivalGroup:Slider({
+    Name = "Teleport back when further than",
+    Flag = "maxDrift",
+    Min = 3, Max = 100, Default = maxDrift, Step = 1, Suffix = " studs",
+    Callback = function(v) maxDrift = v end,
 })
 
 -- stamina: the number lives on Character.Stats, the max is in the bar text on screen ("568/568")
@@ -979,6 +993,21 @@ sharedEnv.__WvoxuSkillSpamCleanup = (function(prev)
         prev()
     end
 end)(sharedEnv.__WvoxuSkillSpamCleanup)
+
+-- skills that push you around: if you end up too far from the spot, go back
+task.spawn(function()
+    while alive do
+        task.wait(0.2)
+        if keepPosition and teleportPos and not menuReason() then
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - teleportPos).Magnitude > maxDrift then
+                root.CFrame = CFrame.new(teleportPos)
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
 
 -- teleport after every spawn, however it happened (your Play press, the script's, or a reset)
 local function teleportAfterSpawn(char)
