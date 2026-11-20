@@ -913,8 +913,15 @@ local function readStamina()
 end
 
 -- a real mouse click on the button, so the game runs its whole Play sequence (the fade, hiding the menu, etc.)
+local hiddenForPlay = false
 local function clickButton(btn, mode)
     local VIM = game:GetService("VirtualInputManager")
+    -- the script's window can sit right on top of the Play button, so get it out of the way first
+    if Window:IsVisible() then
+        hiddenForPlay = true
+        Window:Toggle(false)
+        task.wait(0.4)
+    end
     local sg = btn:FindFirstAncestorWhichIsA("ScreenGui")
     local inset = game:GetService("GuiService"):GetGuiInset()
     local guess = (sg and sg.IgnoreGuiInset) and Vector2.new(0, 0) or inset
@@ -1082,6 +1089,17 @@ task.spawn(function()
                 end
                 pcall(function() game:GetService("TeleportService"):Teleport(WORLDS[target].placeId, LocalPlayer) end)
             end
+        end
+    end
+end)
+
+-- bring the window back once you're in the game
+task.spawn(function()
+    while alive do
+        task.wait(1)
+        if hiddenForPlay and not menuReason() then
+            hiddenForPlay = false
+            if not Window:IsVisible() then Window:Toggle(true) end
         end
     end
 end)
