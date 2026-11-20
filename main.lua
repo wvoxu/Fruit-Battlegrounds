@@ -624,7 +624,6 @@ local Tab = Window:Tab({ Name = "Autofarm", Icon = "Misc" })
 local statusGroup = Tab:Group("Status")
 local statusRow = statusGroup:Label("Status: Off")
 local fruitRow = statusGroup:Label("Fruit: ...")
-local lastRow = statusGroup:Label("Last used: none")
 
 local mainGroup = Tab:Group("Auto Skills")
 mainGroup:Toggle({
@@ -769,9 +768,8 @@ local skillConn = RunService.Heartbeat:Connect(function()
                 lastAttempt[skill] = os.clock()
                 busy[skill] = true
                 task.spawn(function()
-                    local ok, used = pcall(useSkill, fruit, skill)
+                    pcall(useSkill, fruit, skill)
                     busy[skill] = nil
-                    if ok and used then lastRow:Set("Last used: " .. skill) end
                 end)
             end
         end
