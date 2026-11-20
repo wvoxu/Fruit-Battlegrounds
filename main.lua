@@ -577,6 +577,7 @@ end
 local SLOTS = { "1", "2", "3", "4", "5", "G" } -- the hotbar buttons in the game's UI
 local alive = true
 local enabled = false
+local castLikeGame = false
 local useSlot = { ["1"] = true, ["2"] = true, ["3"] = true, ["4"] = true, ["5"] = true, G = false }
 local lastAttempt = {}
 
@@ -643,6 +644,13 @@ mainGroup:Toggle({
         Window:Notify({ Title = "Autofarm " .. (state and "on" or "off"), Text = state and "Using skills" or "Stopped", Duration = 2 })
     end,
 })
+mainGroup:Toggle({
+    Name = "Cast like the game",
+    Flag = "castLikeGame",
+    Description = "Presses each skill's key and clicks, like you would, so every skill works as it should. Slower, and it moves your cursor.",
+    Default = castLikeGame,
+    Callback = function(state) castLikeGame = state end,
+})
 local slotGroup = Tab:Group("Skills")
 for _, slot in ipairs(SLOTS) do
     slotGroup:Toggle({
@@ -680,8 +688,34 @@ local function rootCFrame()
     return root and root.CFrame
 end
 
+-- skills that don't behave like the rest, from what the game sends when you cast them yourself:
+--   plain = true: the cast carries no aim data
+--   hold = seconds: the game keeps sending your position and aim for that long, then clears it
+local SPECIAL = {
+    ["OpeV2/Silence"] = { plain = true, hold = 1.25 },
+}
+
+local holding = 0 -- skills currently sending updates (clearing while another one is still going would cut it off)
 local function useSkill(fruit, skill)
-    skillRemote:FireServer(fruit, skill, { MouseRay = buildMouseRay(), RootCF = rootCFrame() })
+    local special = SPECIAL[fruit .. "/" .. skill]
+    if special and special.plain then
+        skillRemote:FireServer(fruit, skill, {})
+    else
+        skillRemote:FireServer(fruit, skill, { MouseRay = buildMouseRay(), RootCF = rootCFrame() })
+    end
+    if special and special.hold then
+        holding = holding + 1
+        local started = os.clock()
+        while alive and enabled and os.clock() - started < special.hold do
+            task.wait(0.11)
+            skillRemote:FireServer("ClientData", "UpdateData", { RootCF = rootCFrame(), MouseRay = buildMouseRay() })
+        end
+        holding = holding - 1
+        if holding <= 0 then
+            holding = 0
+            skillRemote:FireServer("ClientData", "ClearData", {})
+        end
+    end
 end
 
 -- every frame: each ticked skill is cast again. Each skill runs on its own
@@ -689,7 +723,7 @@ local busy = {}
 local CAST_GAP = 0.12 -- seconds between tries for each skill; no cooldown tracking, the server ignores early ones
 local RunService = game:GetService("RunService")
 local skillConn = RunService.Heartbeat:Connect(function()
-    if not (enabled and alive) then return end
+    if not (enabled and alive) or castLikeGame then return end
     local fruit = currentFruit()
     if not fruit then return end
     local char = LocalPlayer.Character
@@ -705,6 +739,53 @@ local skillConn = RunService.Heartbeat:Connect(function()
                     pcall(useSkill, fruit, skill)
                     busy[skill] = nil
                 end)
+            end
+        end
+    end
+end)
+
+-- "Cast like the game": press the skill's key and click, the way you would. The game's own code then
+-- does everything (aim, holding, whatever the skill needs), so it works for every skill.
+local VIM = game:GetService("VirtualInputManager")
+local KEYS = {
+    ["1"] = Enum.KeyCode.One, ["2"] = Enum.KeyCode.Two, ["3"] = Enum.KeyCode.Three, ["4"] = Enum.KeyCode.Four,
+    ["5"] = Enum.KeyCode.Five, ["6"] = Enum.KeyCode.Six,
+}
+local function keyOfSlot(slot)
+    local bar = hotbar()
+    local btn = bar and bar:FindFirstChild(slot)
+    local label = btn and btn:FindFirstChild("Key")
+    local text = label and label:IsA("TextLabel") and label.Text:upper() or slot:upper()
+    return KEYS[text] or Enum.KeyCode[text]
+end
+
+task.spawn(function()
+    while alive do
+        task.wait(0.05)
+        if enabled and castLikeGame then
+            local char = LocalPlayer.Character
+            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                for _, slot in ipairs(SLOTS) do
+                    if not (enabled and castLikeGame and alive) then break end
+                    if useSlot[slot] and skillOfSlot(slot) then
+                        local key = keyOfSlot(slot)
+                        if key then
+                            VIM:SendKeyEvent(true, key, false, game)
+                            task.wait(0.03)
+                            VIM:SendKeyEvent(false, key, false, game)
+                            task.wait(0.05)
+                            -- click on the middle of the screen, away from the skill bar
+                            local view = workspace.CurrentCamera.ViewportSize
+                            local x, y = view.X * 0.5, view.Y * 0.4
+                            VIM:SendMouseMoveEvent(x, y, game)
+                            VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+                            task.wait(0.05)
+                            VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+                            task.wait(0.05)
+                        end
+                    end
+                end
             end
         end
     end
