@@ -9,7 +9,7 @@ local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lu
 
 local sharedEnv = (getgenv and getgenv()) or _G
 -- close older copies first (this one, and the two separate scripts)
-for _, key in ipairs({ "__WvoxuFruitBattlegroundsCleanup", "__WvoxuSkillSpamCleanup", "__WvoxuFruitSpinnerCleanup" }) do
+for _, key in ipairs({ "__WvoxuFruitBattlegroundsCleanup", "__WvoxuFruitBattlegroundsPvPCleanup", "__WvoxuSkillSpamCleanup", "__WvoxuFruitSpinnerCleanup" }) do
     if sharedEnv[key] then
         pcall(sharedEnv[key])
         sharedEnv[key] = nil
@@ -1148,8 +1148,437 @@ end
 local ok_runSkillSpam, err_runSkillSpam = pcall(runSkillSpam)
 if not ok_runSkillSpam then warn("[Fruit Battlegrounds] Autofarm failed: " .. tostring(err_runSkillSpam)) end
 
+----------------------------------------------------------------------
+-- PVP
+----------------------------------------------------------------------
+local function runPvP()
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VIM = game:GetService("VirtualInputManager")
+local LocalPlayer = Players.LocalPlayer
+
+local alive = true
+local silentAim = false
+local showCircle = false
+local lockMode = "Camera"
+local targetMode = "Closest to cursor"
+local aimPartName = "HumanoidRootPart"
+local fovRadius = 300
+local maxDistance = 600
+local lockSpeed = 5
+local lockedPlayer = nil
+
+local espOn = false
+local espName, espHealth, espDistance = true, true, true
+local espRange = 1500
+local espOutline = true
+local espFill = 1 -- 1 is see-through, so only the outline shows
+
+local Tab = Window:Tab({ Name = "PvP", Icon = "Misc" })
+local aimGroup = Tab:Group("Lock on")
+local silentGroup = Tab:Group("Silent aim")
+local pickGroup = Tab:Group("Target")
+local espGroup = Tab:Group("ESP")
+
+----------------------------------------------------------------------
+-- TARGETS
+----------------------------------------------------------------------
+local function aimPartOf(char)
+    return char and (char:FindFirstChild(aimPartName) or char:FindFirstChild("HumanoidRootPart"))
+end
+
+local function alivePlayerPart(plr)
+    local char = plr and plr.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local part = aimPartOf(char)
+    if hum and part and hum.Health > 0 then return part, hum end
+    return nil
+end
+
+-- the best enemy for a new lock (or for silent aim): inside the circle, by the chosen rule
+local function pickTarget()
+    local cam = workspace.CurrentCamera
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not (cam and myRoot) then return nil end
+    local cursor = UserInputService:GetMouseLocation()
+    local best, bestScore
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local part, hum = alivePlayerPart(plr)
+            if part and not plr.Character:FindFirstChildOfClass("ForceField") then
+                local distance = (part.Position - myRoot.Position).Magnitude
+                if distance <= maxDistance then
+                    local point, onScreen = cam:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local fromCursor = (Vector2.new(point.X, point.Y) - cursor).Magnitude
+                        if fromCursor <= fovRadius then
+                            local score = fromCursor
+                            if targetMode == "Closest to me" then score = distance
+                            elseif targetMode == "Lowest health" then score = hum.Health end
+                            if not bestScore or score < bestScore then best, bestScore = plr, score end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- the part to aim at right now: the player you locked onto, otherwise whoever pickTarget finds
+local function currentAimPart()
+    if lockedPlayer then
+        local part = alivePlayerPart(lockedPlayer)
+        if part then return part end
+    end
+    local plr = pickTarget()
+    return plr and alivePlayerPart(plr) or nil
+end
+
+local function releaseLock(reason)
+    if not lockedPlayer then return end
+    lockedPlayer = nil
+    Window:Notify({ Title = "Lock released", Text = reason or "", Duration = 2 })
+end
+
+----------------------------------------------------------------------
+-- SILENT AIM: your own casts keep the same shape, only the aim in them is swapped for the target
+-- This has to watch the game's remote calls. It is only switched on while the toggle is on.
+----------------------------------------------------------------------
+local skillRemote = ReplicatedStorage:FindFirstChild("ReplicatorNoYield")
+local hooked = false
+
+local function targetRay(part)
+    local cam = workspace.CurrentCamera
+    local origin = cam.CFrame.Position
+    local offset = part.Position - origin
+    return {
+        Origin = origin,
+        Direction = offset.Unit * 300,
+        Instance = part,
+        Position = part.Position,
+        Normal = -offset.Unit,
+        Distance = offset.Magnitude,
+        Material = part.Material,
+    }
+end
+
+local function installHook()
+    if hooked then return true end
+    if not (hookfunction and newcclosure and skillRemote) then return false end
+    local ok = pcall(function()
+        local probe = Instance.new("RemoteEvent")
+        local original
+        original = hookfunction(probe.FireServer, newcclosure(function(self, ...)
+            if silentAim and alive and self == skillRemote and not (checkcaller and checkcaller()) then
+                local args = table.pack(...)
+                local data = args[3]
+                if type(data) == "table" and data.MouseRay ~= nil then
+                    local target = currentAimPart()
+                    if target then
+                        local copy = {}
+                        for k, v in pairs(data) do copy[k] = v end
+                        copy.MouseRay = targetRay(target)
+                        args[3] = copy
+                        return original(self, table.unpack(args, 1, args.n))
+                    end
+                end
+            end
+            return original(self, ...)
+        end))
+        probe:Destroy()
+    end)
+    hooked = ok
+    return ok
+end
+
+----------------------------------------------------------------------
+-- UI
+----------------------------------------------------------------------
+aimGroup:Keybind({
+    Name = "Lock on / release",
+    Description = "Locks onto the player nearest your cursor, and follows them until you press it again.",
+    Flag = "lockKey",
+    Default = Enum.KeyCode.T,
+    Callback = function()
+        if lockedPlayer then
+            releaseLock("You let go")
+            return
+        end
+        local plr = pickTarget()
+        if plr then
+            lockedPlayer = plr
+            Window:Notify({ Title = "Locked on", Text = plr.DisplayName, Duration = 2 })
+        else
+            Window:Notify({ Title = "No target", Text = "Nobody is inside the circle", Duration = 2 })
+        end
+    end,
+})
+aimGroup:Dropdown({
+    Name = "Lock mode",
+    Description = "Camera turns your view. Cursor moves your mouse onto them.",
+    Flag = "lockMode",
+    Options = { "Camera", "Cursor" },
+    Default = lockMode,
+    Callback = function(v) lockMode = v end,
+})
+aimGroup:Slider({
+    Name = "Follow speed",
+    Description = "Lower is smoother and slower to catch up. Around 3 to 6 looks very smooth.",
+    Flag = "lockSpeed",
+    Min = 1, Max = 30, Default = lockSpeed, Step = 1,
+    Callback = function(v) lockSpeed = v end,
+})
+silentGroup:Toggle({
+    Name = "Silent aim",
+    Description = "Your skills go at the target without moving your camera or cursor. The first time you turn it on it starts watching the game's calls, which the game may notice.",
+    Flag = "silentAim",
+    Default = false,
+    Callback = function(state)
+        if state and not installHook() then
+            silentAim = false
+            Window:Notify({ Title = "Silent aim", Text = "Your executor can't do this", Duration = 4 })
+            return
+        end
+        silentAim = state
+    end,
+})
+pickGroup:Dropdown({
+    Name = "Pick target by",
+    Flag = "targetMode",
+    Options = { "Closest to cursor", "Closest to me", "Lowest health" },
+    Default = targetMode,
+    Callback = function(v) targetMode = v end,
+})
+pickGroup:Dropdown({
+    Name = "Aim at",
+    Flag = "aimPart",
+    Options = { "HumanoidRootPart", "Head", "UpperTorso" },
+    Default = aimPartName,
+    Callback = function(v) aimPartName = v end,
+})
+pickGroup:Slider({
+    Name = "Circle size",
+    Description = "Only players inside this circle around your cursor can be locked onto.",
+    Flag = "aimFov",
+    Min = 50, Max = 1000, Default = fovRadius, Step = 10, Suffix = " px",
+    Callback = function(v) fovRadius = v end,
+})
+pickGroup:Slider({
+    Name = "Max distance",
+    Flag = "aimDistance",
+    Min = 50, Max = 2000, Default = maxDistance, Step = 10, Suffix = " studs",
+    Callback = function(v) maxDistance = v end,
+})
+pickGroup:Toggle({
+    Name = "Show circle",
+    Flag = "aimCircle",
+    Default = false,
+    Callback = function(state) showCircle = state end,
+})
+espGroup:Toggle({ Name = "ESP", Flag = "espOn", Default = false, Callback = function(v) espOn = v end })
+espGroup:Toggle({
+    Name = "Outline",
+    Description = "Draws the outline of their character, even through walls.",
+    Flag = "espOutline",
+    Default = true,
+    Callback = function(v) espOutline = v end,
+})
+espGroup:Slider({
+    Name = "Fill",
+    Description = "0 fills the whole body with color, 100 shows only the outline.",
+    Flag = "espFill",
+    Min = 0, Max = 100, Default = 100, Step = 5, Suffix = "%",
+    Callback = function(v) espFill = v / 100 end,
+})
+espGroup:Toggle({ Name = "Show name", Flag = "espName", Default = true, Callback = function(v) espName = v end })
+espGroup:Toggle({ Name = "Show health", Flag = "espHealth", Default = true, Callback = function(v) espHealth = v end })
+espGroup:Toggle({ Name = "Show distance", Flag = "espDistance", Default = true, Callback = function(v) espDistance = v end })
+espGroup:Slider({
+    Name = "ESP range",
+    Flag = "espRange",
+    Min = 100, Max = 5000, Default = espRange, Step = 50, Suffix = " studs",
+    Callback = function(v) espRange = v end,
+})
+
+----------------------------------------------------------------------
+-- THE CIRCLE (only if the executor has Drawing)
+----------------------------------------------------------------------
+local circle
+pcall(function()
+    if Drawing then
+        circle = Drawing.new("Circle")
+        circle.Thickness = 1
+        circle.NumSides = 64
+        circle.Filled = false
+        circle.Color = Color3.fromRGB(255, 255, 255)
+        circle.Visible = false
+    end
+end)
+
+----------------------------------------------------------------------
+-- FOLLOWING THE LOCKED PLAYER
+----------------------------------------------------------------------
+local renderName = "WvoxuAimLock"
+pcall(function() RunService:UnbindFromRenderStep(renderName) end) -- in case an older copy is still bound
+RunService:BindToRenderStep(renderName, Enum.RenderPriority.Camera.Value + 1, function(dt)
+    if not alive then
+        pcall(function() RunService:UnbindFromRenderStep(renderName) end)
+        if circle then pcall(function() circle:Remove() end) circle = nil end
+        return
+    end
+    local cam = workspace.CurrentCamera
+    if circle then
+        circle.Visible = showCircle
+        if showCircle then
+            circle.Position = UserInputService:GetMouseLocation()
+            circle.Radius = fovRadius
+        end
+    end
+    if not (lockedPlayer and cam) then return end
+    local part = alivePlayerPart(lockedPlayer)
+    if not part or not lockedPlayer.Parent then
+        releaseLock("They are gone")
+        return
+    end
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if myRoot and (part.Position - myRoot.Position).Magnitude > maxDistance * 1.5 then
+        releaseLock("Too far away")
+        return
+    end
+    if lockMode == "Camera" then
+        -- the same fraction of the remaining turn every second, whatever the frame rate, so it eases in smoothly
+        local alpha = 1 - math.exp(-lockSpeed * dt)
+        local goal = CFrame.lookAt(cam.CFrame.Position, part.Position)
+        cam.CFrame = cam.CFrame:Lerp(goal, alpha)
+    end
+end)
+
+-- cursor mode: ease the real cursor onto the locked player
+task.spawn(function()
+    local last = os.clock()
+    while alive do
+        task.wait(0.016)
+        local now = os.clock()
+        local dt = now - last
+        last = now
+        if lockedPlayer and lockMode == "Cursor" then
+            local part = alivePlayerPart(lockedPlayer)
+            local cam = workspace.CurrentCamera
+            if part and cam then
+                local point = cam:WorldToViewportPoint(part.Position)
+                local cursor = UserInputService:GetMouseLocation()
+                local alpha = 1 - math.exp(-lockSpeed * dt)
+                pcall(function()
+                    VIM:SendMouseMoveEvent(cursor.X + (point.X - cursor.X) * alpha, cursor.Y + (point.Y - cursor.Y) * alpha, game)
+                end)
+            end
+        end
+    end
+end)
+
+----------------------------------------------------------------------
+-- ESP: name, health and distance above each player's head
+----------------------------------------------------------------------
+local espFolder = Instance.new("Folder")
+espFolder.Name = "WvoxuESP"
+do
+    local parent
+    pcall(function() if gethui then parent = gethui() end end)
+    espFolder.Parent = parent or game:GetService("CoreGui")
+end
+local espEntries = {}
+
+local function removeEsp(plr)
+    local e = espEntries[plr]
+    if e then
+        pcall(function() e.gui:Destroy() end)
+        pcall(function() e.highlight:Destroy() end)
+        espEntries[plr] = nil
+    end
+end
+
+local function makeEsp(plr, head)
+    local highlight = Instance.new("Highlight")
+    highlight.Name = plr.Name
+    highlight.Adornee = plr.Character
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillTransparency = 1
+    highlight.OutlineTransparency = 0
+    highlight.Parent = espFolder
+    local gui = Instance.new("BillboardGui")
+    gui.Name = plr.Name
+    gui.Adornee = head
+    gui.AlwaysOnTop = true
+    gui.Size = UDim2.fromOffset(220, 60)
+    gui.StudsOffset = Vector3.new(0, 3, 0)
+    gui.Parent = espFolder
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.fromScale(1, 1)
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.TextStrokeTransparency = 0.4
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.Parent = gui
+    espEntries[plr] = { gui = gui, label = label, head = head, highlight = highlight, char = plr.Character }
+end
+
+task.spawn(function()
+    while alive do
+        task.wait(0.1)
+        local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                local char = plr.Character
+                local head = char and char:FindFirstChild("Head")
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local distance = (head and myRoot) and (head.Position - myRoot.Position).Magnitude or math.huge
+                if espOn and head and hum and hum.Health > 0 and distance <= espRange then
+                    local e = espEntries[plr]
+                    if e and (e.head ~= head or e.char ~= char) then removeEsp(plr) e = nil end
+                    if not e then makeEsp(plr, head) e = espEntries[plr] end
+                    local lines = {}
+                    if espName then table.insert(lines, (lockedPlayer == plr and "[LOCKED] " or "") .. plr.DisplayName) end
+                    local info = {}
+                    if espHealth then table.insert(info, string.format("%d/%d HP", math.floor(hum.Health), math.floor(hum.MaxHealth))) end
+                    if espDistance then table.insert(info, string.format("%dm", math.floor(distance))) end
+                    if #info > 0 then table.insert(lines, table.concat(info, "  ")) end
+                    e.label.Text = table.concat(lines, "\n")
+                    local isLocked = lockedPlayer == plr
+                    e.highlight.Enabled = espOutline
+                    e.highlight.FillTransparency = espFill
+                    e.highlight.OutlineColor = isLocked and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(255, 255, 255)
+                    e.highlight.FillColor = isLocked and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(255, 255, 255)
+                    local fraction = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+                    e.label.TextColor3 = lockedPlayer == plr and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(255, 80, 80):Lerp(Color3.fromRGB(80, 255, 120), fraction)
+                else
+                    removeEsp(plr)
+                end
+            end
+        end
+        for plr in pairs(espEntries) do
+            if not plr.Parent then removeEsp(plr) end
+        end
+    end
+end)
+
+sharedEnv.__WvoxuFruitBattlegroundsPvPCleanup = function()
+    alive = false
+    silentAim = false
+    lockedPlayer = nil
+    for plr in pairs(espEntries) do removeEsp(plr) end
+    pcall(function() espFolder:Destroy() end)
+end
+end
+local ok_runPvP, err_runPvP = pcall(runPvP)
+if not ok_runPvP then warn("[Fruit Battlegrounds] PvP failed: " .. tostring(err_runPvP)) end
+
 sharedEnv.__WvoxuFruitBattlegroundsCleanup = function()
-    for _, key in ipairs({ "__WvoxuSkillSpamCleanup", "__WvoxuFruitSpinnerCleanup" }) do
+    for _, key in ipairs({ "__WvoxuSkillSpamCleanup", "__WvoxuFruitSpinnerCleanup", "__WvoxuFruitBattlegroundsPvPCleanup" }) do
         if sharedEnv[key] then
             pcall(sharedEnv[key])
             sharedEnv[key] = nil
