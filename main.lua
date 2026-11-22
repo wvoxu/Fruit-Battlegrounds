@@ -574,11 +574,11 @@ end
 ----------------------------------------------------------------------
 -- STATE
 ----------------------------------------------------------------------
-local SLOTS = { "1", "2", "3", "4", "5", "G" } -- the hotbar buttons in the game's UI
+local SLOTS = { "1", "2", "3", "4", "5", "E", "G" } -- the hotbar buttons in the game's UI
 local alive = true
 local enabled = false
-local gameSlot = { ["1"] = false, ["2"] = false, ["3"] = false, ["4"] = false, ["5"] = false, G = false } -- slots cast by pressing the key and clicking
-local useSlot = { ["1"] = true, ["2"] = true, ["3"] = true, ["4"] = true, ["5"] = true, G = false }
+local gameSlot = { ["1"] = false, ["2"] = false, ["3"] = false, ["4"] = false, ["5"] = false, E = false, G = false } -- slots cast by pressing the key and clicking
+local useSlot = { ["1"] = true, ["2"] = true, ["3"] = true, ["4"] = true, ["5"] = true, E = true, G = false }
 local lastAttempt = {}
 
 ----------------------------------------------------------------------
@@ -796,7 +796,13 @@ task.spawn(function()
                     if useSlot[slot] and gameSlot[slot] and skillOfSlot(slot) and os.clock() - (lastGameCast[slot] or 0) >= gameInterval then
                         lastGameCast[slot] = os.clock()
                         local key = keyOfSlot(slot)
-                        if key then
+                        if key == Enum.KeyCode.E then
+                            -- the E skill is used by just pressing E: nothing to equip, no click
+                            VIM:SendKeyEvent(true, key, false, game)
+                            task.wait(0.03)
+                            VIM:SendKeyEvent(false, key, false, game)
+                            task.wait(0.05)
+                        elseif key then
                             -- a skill stays equipped after you use it, and pressing its key again would put it away,
                             -- so the next click would be a plain M1. Only press the key when switching to another skill.
                             if not isEquipped(slot) then
