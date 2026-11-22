@@ -577,7 +577,7 @@ end
 local SLOTS = { "1", "2", "3", "4", "5", "G" } -- the hotbar buttons in the game's UI
 local alive = true
 local enabled = false
-local castLikeGame = false
+local gameSlot = { ["1"] = false, ["2"] = false, ["3"] = false, ["4"] = false, ["5"] = false, G = false } -- slots cast by pressing the key and clicking
 local useSlot = { ["1"] = true, ["2"] = true, ["3"] = true, ["4"] = true, ["5"] = true, G = false }
 local lastAttempt = {}
 
@@ -644,20 +644,26 @@ mainGroup:Toggle({
         Window:Notify({ Title = "Autofarm " .. (state and "on" or "off"), Text = state and "Using skills" or "Stopped", Duration = 2 })
     end,
 })
-mainGroup:Toggle({
-    Name = "Cast like the game",
-    Flag = "castLikeGame",
-    Description = "Presses each skill's key and clicks, like you would, so every skill works as it should. Slower, and it moves your cursor.",
-    Default = castLikeGame,
-    Callback = function(state) castLikeGame = state end,
-})
 local slotGroup = Tab:Group("Skills")
+local SLOT_MODES = { "Off", "Fast", "Like the game" }
+local gameInterval = 3 -- seconds between uses of a "Like the game" slot: a click while a skill is cooling down is just an M1
+local lastGameCast = {}
+slotGroup:Slider({
+    Name = "Like the game: every",
+    Flag = "gameInterval",
+    Min = 0.5, Max = 20, Default = gameInterval, Step = 0.5, Suffix = " s",
+    Callback = function(v) gameInterval = v end,
+})
 for _, slot in ipairs(SLOTS) do
-    slotGroup:Toggle({
-        Name = "Use slot " .. slot,
-        Flag = "use" .. slot,
-        Default = useSlot[slot],
-        Callback = function(state) useSlot[slot] = state end,
+    slotGroup:Dropdown({
+        Name = "Slot " .. slot,
+        Flag = "mode" .. slot,
+        Options = SLOT_MODES,
+        Default = useSlot[slot] and "Fast" or "Off",
+        Callback = function(mode)
+            useSlot[slot] = mode ~= "Off"
+            gameSlot[slot] = mode == "Like the game"
+        end,
     })
 end
 
@@ -723,7 +729,7 @@ local busy = {}
 local CAST_GAP = 0.12 -- seconds between tries for each skill; no cooldown tracking, the server ignores early ones
 local RunService = game:GetService("RunService")
 local skillConn = RunService.Heartbeat:Connect(function()
-    if not (enabled and alive) or castLikeGame then return end
+    if not (enabled and alive) then return end
     local fruit = currentFruit()
     if not fruit then return end
     local char = LocalPlayer.Character
@@ -731,7 +737,7 @@ local skillConn = RunService.Heartbeat:Connect(function()
     if not (humanoid and humanoid.Health > 0) then return end
     for _, slot in ipairs(SLOTS) do
         local skill = skillOfSlot(slot)
-        if useSlot[slot] and skill and not busy[skill] then
+        if useSlot[slot] and not gameSlot[slot] and skill and not busy[skill] then
             if os.clock() - (lastAttempt[skill] or 0) >= CAST_GAP then
                 lastAttempt[skill] = os.clock()
                 busy[skill] = true
@@ -759,28 +765,53 @@ local function keyOfSlot(slot)
     return KEYS[text] or Enum.KeyCode[text]
 end
 
+local equippedSlot = nil -- the slot we last equipped; forgotten when the character respawns
+
+-- is this slot's skill equipped right now? Skills are tools named like the skill bar: in your character when
+-- equipped, in your backpack when not. If the game doesn't use tools for this skill, go by what we pressed last.
+local function isEquipped(slot)
+    local bar = hotbar()
+    local btn = bar and bar:FindFirstChild(slot)
+    local title = btn and btn:FindFirstChild("Title")
+    local name = title and title:IsA("TextLabel") and title.Text or nil
+    if name and name ~= "" then
+        local char = LocalPlayer.Character
+        local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+        if char and char:FindFirstChild(name) then return true end
+        if backpack and backpack:FindFirstChild(name) then return false end
+    end
+    return equippedSlot == slot
+end
+LocalPlayer.CharacterAdded:Connect(function() equippedSlot = nil end)
+
 task.spawn(function()
     while alive do
         task.wait(0.05)
-        if enabled and castLikeGame then
+        if enabled then
             local char = LocalPlayer.Character
             local humanoid = char and char:FindFirstChildOfClass("Humanoid")
             if humanoid and humanoid.Health > 0 then
                 for _, slot in ipairs(SLOTS) do
-                    if not (enabled and castLikeGame and alive) then break end
-                    if useSlot[slot] and skillOfSlot(slot) then
+                    if not (enabled and alive) then break end
+                    if useSlot[slot] and gameSlot[slot] and skillOfSlot(slot) and os.clock() - (lastGameCast[slot] or 0) >= gameInterval then
+                        lastGameCast[slot] = os.clock()
                         local key = keyOfSlot(slot)
                         if key then
-                            VIM:SendKeyEvent(true, key, false, game)
-                            task.wait(0.03)
-                            VIM:SendKeyEvent(false, key, false, game)
-                            task.wait(0.05)
+                            -- a skill stays equipped after you use it, and pressing its key again would put it away,
+                            -- so the next click would be a plain M1. Only press the key when switching to another skill.
+                            if not isEquipped(slot) then
+                                VIM:SendKeyEvent(true, key, false, game)
+                                task.wait(0.03)
+                                VIM:SendKeyEvent(false, key, false, game)
+                                task.wait(0.05)
+                                equippedSlot = slot
+                            end
                             -- click on the middle of the screen, away from the skill bar
                             local view = workspace.CurrentCamera.ViewportSize
                             local x, y = view.X * 0.5, view.Y * 0.4
                             VIM:SendMouseMoveEvent(x, y, game)
                             VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
-                            task.wait(0.05)
+                            task.wait(0.015) -- as short as possible, so the game's Auto M1 doesn't see a held button
                             VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
                             task.wait(0.05)
                         end
@@ -823,6 +854,45 @@ local function parsePos(text)
 end
 
 local survivalGroup = Tab:Group("Survival")
+-- come back after being disconnected or kicked
+local autoRejoin = true
+survivalGroup:Toggle({
+    Name = "Auto rejoin",
+    Description = "Rejoins the same world if you get disconnected or kicked.",
+    Flag = "autoRejoin",
+    Default = autoRejoin,
+    Callback = function(state) autoRejoin = state end,
+})
+do
+    local GuiService = game:GetService("GuiService")
+    local TeleportService = game:GetService("TeleportService")
+    local rejoining = false
+    local function rejoin(message)
+        if rejoining or not autoRejoin or not alive then return end
+        rejoining = true
+        dbg("disconnected (" .. tostring(message) .. "), rejoining")
+        task.spawn(function()
+            task.wait(3)
+            for _ = 1, 60 do
+                if not (alive and autoRejoin) then break end
+                pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
+                task.wait(10)
+            end
+            rejoining = false
+        end)
+    end
+    GuiService.ErrorMessageChanged:Connect(function(message)
+        if message and message ~= "" then rejoin(message) end
+    end)
+    -- the disconnect window can also show up without that event firing
+    pcall(function()
+        local overlay = game:GetService("CoreGui").RobloxPromptGui.promptOverlay
+        overlay.ChildAdded:Connect(function(child)
+            if child.Name == "ErrorPrompt" then rejoin("error prompt") end
+        end)
+    end)
+end
+
 survivalGroup:Toggle({
     Name = "Reset on low stamina",
     Flag = "resetStamina",
