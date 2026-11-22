@@ -268,7 +268,10 @@ local function queueWebhook(embed)
             local sent = false
             for attempt = 1, 6 do
                 local ok, reason, wait = sendWebhook(batch)
-                if ok then sent = true break end
+                if ok then
+                    sent = true
+                    break
+                end
                 if reason == "no webhook set" then break end
                 task.wait((wait or (attempt * 1.5)) + 0.2)
             end
@@ -1503,7 +1506,10 @@ pcall(function() RunService:UnbindFromRenderStep(renderName) end) -- in case an 
 RunService:BindToRenderStep(renderName, Enum.RenderPriority.Camera.Value + 1, function(dt)
     if not alive then
         pcall(function() RunService:UnbindFromRenderStep(renderName) end)
-        if circle then pcall(function() circle:Remove() end) circle = nil end
+        if circle then
+            pcall(function() circle:Remove() end)
+            circle = nil
+        end
         return
     end
     local cam = workspace.CurrentCamera
@@ -1615,8 +1621,14 @@ task.spawn(function()
                 local distance = (head and myRoot) and (head.Position - myRoot.Position).Magnitude or math.huge
                 if espOn and head and hum and hum.Health > 0 and distance <= espRange then
                     local e = espEntries[plr]
-                    if e and (e.head ~= head or e.char ~= char) then removeEsp(plr) e = nil end
-                    if not e then makeEsp(plr, head) e = espEntries[plr] end
+                    if e and (e.head ~= head or e.char ~= char) then
+                        removeEsp(plr)
+                        e = nil
+                    end
+                    if not e then
+                        makeEsp(plr, head)
+                        e = espEntries[plr]
+                    end
                     local lines = {}
                     if espName then table.insert(lines, (lockedPlayer == plr and "[LOCKED] " or "") .. plr.DisplayName) end
                     local info = {}
