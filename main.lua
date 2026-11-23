@@ -1148,9 +1148,6 @@ worldGroup:Toggle({
 
 local function goToWorld(target)
     Window:Notify({ Title = "Changing world", Text = "Going to world " .. target, Duration = 3 })
-    -- write the settings out now, so the new world starts from exactly what's on screen
-    pcall(function() Window:SaveConfig("Default") end)
-    task.wait(0.5)
     if queue_on_teleport and SCRIPT_URL ~= "" then
         pcall(queue_on_teleport, string.format('loadstring(game:HttpGet("%s"))()', SCRIPT_URL))
     end
@@ -1171,6 +1168,7 @@ for i = 1, #WORLDS do
 end
 
 local lastWorldHop = 0
+local startedAt = os.clock()
 task.spawn(function()
     local lastText
     while alive do
@@ -1178,7 +1176,8 @@ task.spawn(function()
         local level, fruitName = readLevel()
         local text = string.format("Level: %s  |  World: %s", level and (level .. " (" .. tostring(fruitName) .. ")") or "?", currentWorld and tostring(currentWorld) or "?")
         if text ~= lastText then lastText = text; levelRow:Set(text) end
-        if autoWorld and level and currentWorld and os.clock() - lastWorldHop > 20 then
+        -- not in the first seconds: the window is still loading your saved settings, and leaving now would lose them
+        if autoWorld and level and currentWorld and os.clock() - lastWorldHop > 20 and os.clock() - startedAt > 12 then
             local target = currentWorld
             for i, w in ipairs(WORLDS) do
                 if level >= w.level then target = math.max(target, i) end
