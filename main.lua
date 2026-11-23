@@ -1146,6 +1146,30 @@ worldGroup:Toggle({
     Callback = function(state) autoWorld = state end,
 })
 
+local function goToWorld(target)
+    Window:Notify({ Title = "Changing world", Text = "Going to world " .. target, Duration = 3 })
+    -- write the settings out now, so the new world starts from exactly what's on screen
+    pcall(function() Window:SaveConfig("Default") end)
+    task.wait(0.5)
+    if queue_on_teleport and SCRIPT_URL ~= "" then
+        pcall(queue_on_teleport, string.format('loadstring(game:HttpGet("%s"))()', SCRIPT_URL))
+    end
+    pcall(function() game:GetService("TeleportService"):Teleport(WORLDS[target].placeId, LocalPlayer) end)
+end
+
+for i = 1, #WORLDS do
+    worldGroup:Button({
+        Name = "Go to world " .. i,
+        Callback = function()
+            if currentWorld == i then
+                Window:Notify({ Title = "Already here", Text = "You're in world " .. i, Duration = 2 })
+            else
+                goToWorld(i)
+            end
+        end,
+    })
+end
+
 local lastWorldHop = 0
 task.spawn(function()
     local lastText
@@ -1162,11 +1186,7 @@ task.spawn(function()
             if target > currentWorld then
                 lastWorldHop = os.clock()
                 dbg("level " .. level .. ", going to world " .. target)
-                Window:Notify({ Title = "Changing world", Text = "Going to world " .. target, Duration = 3 })
-                if queue_on_teleport and SCRIPT_URL ~= "" then
-                    pcall(queue_on_teleport, string.format('loadstring(game:HttpGet("%s"))()', SCRIPT_URL))
-                end
-                pcall(function() game:GetService("TeleportService"):Teleport(WORLDS[target].placeId, LocalPlayer) end)
+                goToWorld(target)
             end
         end
     end
