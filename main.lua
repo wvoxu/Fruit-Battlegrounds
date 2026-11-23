@@ -589,6 +589,7 @@ end
 ----------------------------------------------------------------------
 local SLOTS = { "1", "2", "3", "4", "5", "E", "G" } -- the hotbar buttons in the game's UI
 local alive = true
+local travelling = false -- true while the script is talking to Kuma: farming and keep-teleporting pause
 local enabled = false
 local gameSlot = { ["1"] = false, ["2"] = false, ["3"] = false, ["4"] = false, ["5"] = false, E = false, G = false } -- slots cast by pressing the key and clicking
 local useSlot = { ["1"] = true, ["2"] = true, ["3"] = true, ["4"] = true, ["5"] = true, E = true, G = false }
@@ -742,7 +743,7 @@ local busy = {}
 local CAST_GAP = 0.12 -- seconds between tries for each skill; no cooldown tracking, the server ignores early ones
 local RunService = game:GetService("RunService")
 local skillConn = RunService.Heartbeat:Connect(function()
-    if not (enabled and alive) then return end
+    if not (enabled and alive) or travelling then return end
     local fruit = currentFruit()
     if not fruit then return end
     local char = LocalPlayer.Character
@@ -800,7 +801,7 @@ LocalPlayer.CharacterAdded:Connect(function() equippedSlot = nil end)
 task.spawn(function()
     while alive do
         task.wait(0.05)
-        if enabled then
+        if enabled and not travelling then
             local char = LocalPlayer.Character
             local humanoid = char and char:FindFirstChildOfClass("Humanoid")
             if humanoid and humanoid.Health > 0 then
@@ -850,8 +851,8 @@ local autoPlay = true
 local teleportOn = true
 -- the worlds: you can go to the next one at the level shown. Each has its own spot to teleport to.
 local WORLDS = {
-    { placeId = 9224601490,  level = 0,   spot = Vector3.new(-568, 640, -1338) },
-    { placeId = 16190471004, level = 100, spot = Vector3.new(-224, -394, -2728) },
+    { placeId = 9224601490,  level = 0,   npc = "dressrosa",  spot = Vector3.new(-568, 640, -1338) },
+    { placeId = 16190471004, level = 100, npc = "whole cake", spot = Vector3.new(-224, -394, -2728) },
     { placeId = 12413901502, level = 200, spot = Vector3.new(-1924, 265, 850) },
 }
 local currentWorld = nil
@@ -875,6 +876,8 @@ end
 local survivalGroup = Tab:Group("Survival")
 -- come back after being disconnected or kicked
 local autoRejoin = true
+local teleportEvents = 0
+local teleportingUntil = 0 -- while a teleport is under way, Auto rejoin stays out of the way
 survivalGroup:Toggle({
     Name = "Auto rejoin",
     Description = "Rejoins the same world if you get disconnected or kicked.",
@@ -886,8 +889,13 @@ do
     local GuiService = game:GetService("GuiService")
     local TeleportService = game:GetService("TeleportService")
     local rejoining = false
+    LocalPlayer.OnTeleport:Connect(function()
+        teleportEvents = teleportEvents + 1
+        teleportingUntil = os.clock() + 120 -- a teleport the game or you started: that isn't a disconnect
+    end)
     local function rejoin(message)
         if rejoining or not autoRejoin or not alive then return end
+        if os.clock() < teleportingUntil or tostring(message):find("ClientInitiated") then return end
         rejoining = true
         dbg("disconnected (" .. tostring(message) .. "), rejoining")
         task.spawn(function()
@@ -1104,7 +1112,7 @@ task.spawn(function()
                     -- just spawned in
                     wasInMenu = false
                     playAttempts = 0
-                elseif enabled and resetOnLowStamina and os.clock() - lastReset > 6 then
+                elseif enabled and not travelling and resetOnLowStamina and os.clock() - lastReset > 6 then
                     local frac = readStamina()
                     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
                     if frac and humanoid and humanoid.Health > 0 and frac * 100 <= resetBelow then
@@ -1156,10 +1164,136 @@ worldGroup:Toggle({
     Callback = function(state) autoWorld = state end,
 })
 
+-- joining world 1 directly sends you back to the world you were last in, so Kuma has to do it:
+-- stand next to him, click him, then click the option with the world's name
+local function talkToKuma(keyword)
+    local Camera = workspace.CurrentCamera
+    local npcs = workspace:FindFirstChild("NPCs")
+    local kuma = npcs and npcs:FindFirstChild("Kuma")
+    local kumaRoot = kuma and kuma:FindFirstChild("HumanoidRootPart")
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local ui = LocalPlayer.PlayerGui:FindFirstChild("UI")
+    local dialogue = ui and ui:FindFirstChild("Dialogue")
+    if not (kumaRoot and root and dialogue and Camera) then return false end
+
+    local VIM = game:GetService("VirtualInputManager")
+    local inset = game:GetService("GuiService"):GetGuiInset()
+    local oldType = Camera.CameraType
+    if Window:IsVisible() then
+        hiddenForPlay = true
+        Window:Toggle(false)
+        task.wait(0.4)
+    end
+
+    local function click(x, y)
+        VIM:SendMouseMoveEvent(x, y, game)
+        task.wait(0.05)
+        VIM:SendMouseMoveEvent(x + 1, y, game)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(x + 1, y, 0, true, game, 0)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(x + 1, y, 0, false, game, 0)
+    end
+    local function optionButtons()
+        local list = {}
+        for _, d in ipairs(dialogue:GetChildren()) do
+            if d:IsA("GuiButton") and d.Name:match("^Option%d+$") then
+                local label = d:IsA("TextButton") and d.Text or ""
+                if label == "" or label:match("^Option%d+$") then
+                    local child = d:FindFirstChildWhichIsA("TextLabel", true)
+                    label = child and child.Text or ""
+                end
+                table.insert(list, { button = d, text = label })
+            end
+        end
+        return list
+    end
+
+    local done = false
+    for attempt = 1, 4 do
+        if not alive then break end
+        -- 1. stand 7 studs in front of Kuma and look at him
+        local front = kumaRoot.Position + kumaRoot.CFrame.LookVector * 7
+        root.CFrame = CFrame.lookAt(front, Vector3.new(kumaRoot.Position.X, front.Y, kumaRoot.Position.Z))
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        task.wait(0.4)
+        Camera.CameraType = Enum.CameraType.Scriptable
+        Camera.CFrame = CFrame.lookAt(front + Vector3.new(0, 2, 0), kumaRoot.Position)
+        task.wait(0.15)
+
+        -- 2. click him (the retries move the click a bit, the way Auto Play does)
+        local point = Camera:WorldToViewportPoint(kumaRoot.Position)
+        local offset = ({ Vector2.new(0, 0), inset, Vector2.new(0, -inset.Y), Vector2.new(0, 0) })[attempt]
+        click(point.X + offset.X, point.Y + offset.Y)
+        local opened = false
+        for _ = 1, 20 do
+            task.wait(0.1)
+            if dialogue.Visible then
+                opened = true
+                break
+            end
+        end
+        Camera.CameraType = oldType
+
+        if opened then
+            -- 3. wait for the option names to fill in, then click the one for this world
+            local target
+            for _ = 1, 30 do
+                task.wait(0.1)
+                for _, o in ipairs(optionButtons()) do
+                    if o.text:lower():find(keyword, 1, true) then target = o end
+                end
+                if target then break end
+            end
+            if not target then
+                local names = {}
+                for _, o in ipairs(optionButtons()) do table.insert(names, o.text) end
+                dbg("no option matched \"" .. keyword .. "\": " .. table.concat(names, " | "))
+                for _, o in ipairs(optionButtons()) do
+                    if o.text:lower() == "cancel" then clickButton(o.button, 1) end
+                end
+                break
+            end
+            local before = teleportEvents
+            for mode = 1, 4 do
+                clickButton(target.button, mode)
+                for _ = 1, 40 do
+                    task.wait(0.1)
+                    if teleportEvents > before then break end
+                end
+                if teleportEvents > before then
+                    done = true
+                    break
+                end
+            end
+        end
+        if done then break end
+    end
+    Camera.CameraType = oldType
+    return done
+end
+
 local function goToWorld(target)
+    teleportingUntil = os.clock() + 120
     Window:Notify({ Title = "Changing world", Text = "Going to world " .. target, Duration = 3 })
     if queue_on_teleport and SCRIPT_URL ~= "" then
         pcall(queue_on_teleport, string.format('loadstring(game:HttpGet("%s"))()', SCRIPT_URL))
+    end
+    if target == 1 and currentWorld and currentWorld ~= 1 then
+        -- the plain teleport to world 1 just bounces you back, so go through Kuma
+        if travelling then return end
+        travelling = true
+        task.spawn(function()
+            local ok, found = pcall(talkToKuma, WORLDS[1].npc)
+            travelling = false
+            if not ok or not found then
+                teleportingUntil = 0
+                Window:Notify({ Title = "Couldn't reach Kuma", Text = "Try again from the world's spawn.", Duration = 4 })
+                dbg("Kuma route failed: " .. tostring(found))
+            end
+        end)
+        return
     end
     pcall(function() game:GetService("TeleportService"):Teleport(WORLDS[target].placeId, LocalPlayer) end)
 end
@@ -1214,7 +1348,7 @@ end)
 task.spawn(function()
     while alive do
         task.wait(0.2)
-        if keepPosition and teleportPos and not menuReason() then
+        if keepPosition and teleportPos and not travelling and not menuReason() then
             local char = LocalPlayer.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if root and (root.Position - teleportPos).Magnitude > maxDrift then
