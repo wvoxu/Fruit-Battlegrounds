@@ -1,9 +1,8 @@
 -- Fruit Battlegrounds (by wvoxu): auto spinner + skill spam in one window.
 -- The UI library is loaded from LIB_URL (main.lua in the UI Library repo); its credits are in its header.
 
--- Link to this script (raw), so it restarts itself after moving to another world.
--- Leave it empty if the script is in your executor's autoexec folder instead.
-local SCRIPT_URL = ""
+-- Link to this script (raw): after any teleport it loads itself again in the next world.
+local SCRIPT_URL = "https://raw.githubusercontent.com/wvoxu/Fruit-Battlegrounds/refs/heads/main/main.lua"
 
 local LIB_URL = "https://raw.githubusercontent.com/wvoxu/UI-Library/main/main.lua"
 
@@ -15,6 +14,8 @@ for _, key in ipairs({ "__WvoxuFruitBattlegroundsCleanup", "__WvoxuFruitBattlegr
         sharedEnv[key] = nil
     end
 end
+
+sharedEnv.__WvoxuFruitBattlegroundsJob = game.JobId -- lets the reload after a teleport see that autoexec already started the script here
 
 local UILib
 do
@@ -852,7 +853,7 @@ local teleportOn = true
 -- the worlds: you can go to the next one at the level shown. Each has its own spot to teleport to.
 local WORLDS = {
     { placeId = 9224601490,  level = 0,   npc = "dressrosa",  spot = Vector3.new(-568, 640, -1338) },
-    { placeId = 16190471004, level = 100, npc = "whole cake", spot = Vector3.new(-224, -394, -2728) },
+    { placeId = 16190471004, level = 100, spot = Vector3.new(-224, -394, -2728) },
     { placeId = 12413901502, level = 200, spot = Vector3.new(-1924, 265, 850) },
 }
 local currentWorld = nil
@@ -876,6 +877,14 @@ end
 local survivalGroup = Tab:Group("Survival")
 -- come back after being disconnected or kicked
 local autoRejoin = true
+local autoExecute = true
+survivalGroup:Toggle({
+    Name = "Reload after teleport",
+    Description = "Starts the script again in the next world (skipped if autoexec already did).",
+    Flag = "autoExecute",
+    Default = autoExecute,
+    Callback = function(state) autoExecute = state end,
+})
 local teleportEvents = 0
 local teleportingUntil = 0 -- while a teleport is under way, Auto rejoin stays out of the way
 survivalGroup:Toggle({
@@ -889,7 +898,28 @@ do
     local GuiService = game:GetService("GuiService")
     local TeleportService = game:GetService("TeleportService")
     local rejoining = false
-    LocalPlayer.OnTeleport:Connect(function()
+    -- queued once per teleport; the queued code only runs the script in one of the three worlds,
+    -- and not when autoexec already started it in that server
+    local queued = false
+    local function queueReload()
+        if queued or not autoExecute or not queue_on_teleport or SCRIPT_URL == "" then return end
+        queued = true
+        local ids = {}
+        for _, w in ipairs(WORLDS) do table.insert(ids, tostring(w.placeId)) end
+        pcall(queue_on_teleport, string.format([[
+local env = (getgenv and getgenv()) or _G
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(5)
+if env.__WvoxuFruitBattlegroundsJob == game.JobId then return end
+if not table.find({%s}, game.PlaceId) then return end
+loadstring(game:HttpGet("%s", true))()]], table.concat(ids, ", "), SCRIPT_URL))
+    end
+    LocalPlayer.OnTeleport:Connect(function(state)
+        if state == Enum.TeleportState.Failed then
+            queued = false
+            return
+        end
+        queueReload()
         teleportEvents = teleportEvents + 1
         teleportingUntil = os.clock() + 120 -- a teleport the game or you started: that isn't a disconnect
     end)
@@ -1012,7 +1042,6 @@ end
 -- a real mouse click on the button, so the game runs its whole Play sequence (the fade, hiding the menu, etc.)
 local hiddenForPlay = false
 local function clickButton(btn, mode)
-    local VIM = game:GetService("VirtualInputManager")
     -- the script's window can sit right on top of the Play button, so get it out of the way first
     if Window:IsVisible() then
         hiddenForPlay = true
@@ -1177,7 +1206,6 @@ local function talkToKuma(keyword)
     local dialogue = ui and ui:FindFirstChild("Dialogue")
     if not (kumaRoot and root and dialogue and Camera) then return false end
 
-    local VIM = game:GetService("VirtualInputManager")
     local inset = game:GetService("GuiService"):GetGuiInset()
     local oldType = Camera.CameraType
     if Window:IsVisible() then
@@ -1211,7 +1239,7 @@ local function talkToKuma(keyword)
     end
 
     local done = false
-    for attempt = 1, 4 do
+    for attempt = 1, 3 do
         if not alive then break end
         -- 1. stand 7 studs in front of Kuma and look at him
         local front = kumaRoot.Position + kumaRoot.CFrame.LookVector * 7
@@ -1224,7 +1252,7 @@ local function talkToKuma(keyword)
 
         -- 2. click him (the retries move the click a bit, the way Auto Play does)
         local point = Camera:WorldToViewportPoint(kumaRoot.Position)
-        local offset = ({ Vector2.new(0, 0), inset, Vector2.new(0, -inset.Y), Vector2.new(0, 0) })[attempt]
+        local offset = ({ Vector2.new(0, 0), inset, -inset })[attempt]
         click(point.X + offset.X, point.Y + offset.Y)
         local opened = false
         for _ = 1, 20 do
@@ -1277,9 +1305,6 @@ end
 local function goToWorld(target)
     teleportingUntil = os.clock() + 120
     Window:Notify({ Title = "Changing world", Text = "Going to world " .. target, Duration = 3 })
-    if queue_on_teleport and SCRIPT_URL ~= "" then
-        pcall(queue_on_teleport, string.format('loadstring(game:HttpGet("%s"))()', SCRIPT_URL))
-    end
     if target == 1 and currentWorld and currentWorld ~= 1 then
         -- the plain teleport to world 1 just bounces you back, so go through Kuma
         if travelling then return end
