@@ -36,6 +36,16 @@ do
     UILib = library
 end
 
+-- Wait for the game's data BEFORE the window exists. If the script waits for it halfway through building the
+-- window (it used to), the window loads your saved settings before the controls exist, then saves the defaults over them.
+if not game:IsLoaded() then game.Loaded:Wait() end
+do
+    local player = game:GetService("Players").LocalPlayer
+    pcall(function() player:WaitForChild("MAIN_DATA", 60) end)
+    pcall(function() game:GetService("ReplicatedStorage"):WaitForChild("ReplicatorNoYield", 60) end)
+    pcall(function() player:WaitForChild("PlayerGui", 60) end)
+end
+
 local Window = UILib:Window({
     Title = "Fruit Battlegrounds",
     Subtitle = "by wvoxu",
@@ -1168,7 +1178,6 @@ for i = 1, #WORLDS do
 end
 
 local lastWorldHop = 0
-local startedAt = os.clock()
 task.spawn(function()
     local lastText
     while alive do
@@ -1176,8 +1185,7 @@ task.spawn(function()
         local level, fruitName = readLevel()
         local text = string.format("Level: %s  |  World: %s", level and (level .. " (" .. tostring(fruitName) .. ")") or "?", currentWorld and tostring(currentWorld) or "?")
         if text ~= lastText then lastText = text; levelRow:Set(text) end
-        -- not in the first seconds: the window is still loading your saved settings, and leaving now would lose them
-        if autoWorld and level and currentWorld and os.clock() - lastWorldHop > 20 and os.clock() - startedAt > 12 then
+        if autoWorld and level and currentWorld and os.clock() - lastWorldHop > 20 then
             local target = currentWorld
             for i, w in ipairs(WORLDS) do
                 if level >= w.level then target = math.max(target, i) end
