@@ -743,8 +743,57 @@ end
 local busy = {}
 local CAST_GAP = 0.12 -- seconds between tries for each skill; no cooldown tracking, the server ignores early ones
 local RunService = game:GetService("RunService")
+-- "Like the game" clicks the screen, which would press this window's own buttons. So while Auto Skills is on with one
+-- of those skills, nothing is cast while the menu is open; it carries on when you close it.
+local function likeTheGameOn()
+    if not enabled then return false end
+    for _, slot in ipairs(SLOTS) do
+        if useSlot[slot] and gameSlot[slot] then return true end
+    end
+    return false
+end
+-- A click that is already on its way when the menu opens would land on it. So when the menu opens with that on, a clear
+-- shield sits over the whole window for half a second and swallows the mouse. It goes up in the same call that opens it.
+local guard = Instance.new("TextButton")
+guard.Name = "ClickGuard"
+guard.Text = ""
+guard.AutoButtonColor = false
+guard.BackgroundTransparency = 1
+guard.Size = UDim2.fromScale(1, 1)
+guard.ZIndex = 100
+guard.Visible = false
+guard.Parent = Window.Frame
+local libToggle = Window.Toggle
+function Window:Toggle(state, fromButton)
+    if likeTheGameOn() and state ~= false and not self:IsVisible() then
+        guard.Visible = true
+        task.delay(0.5, function() guard.Visible = false end)
+    end
+    return libToggle(self, state, fromButton)
+end
+local pausedForMenu = false
+local function menuPause()
+    local paused = likeTheGameOn() and Window:IsVisible()
+    if paused ~= pausedForMenu then
+        pausedForMenu = paused
+        if paused then Window:Notify({ Title = "Auto skills paused", Text = "They carry on when you close the menu.", Duration = 3 }) end
+    end
+    return paused
+end
+-- after a world change the settings come back on by themselves and nobody is there to close the menu: shut it once
+task.spawn(function()
+    local started = os.clock()
+    while alive and os.clock() - started < 8 do
+        task.wait(0.25)
+        if likeTheGameOn() and Window:IsVisible() then
+            Window:Toggle(false)
+            break
+        end
+    end
+end)
+
 local skillConn = RunService.Heartbeat:Connect(function()
-    if not (enabled and alive) or travelling then return end
+    if not (enabled and alive) or travelling or menuPause() then return end
     local fruit = currentFruit()
     if not fruit then return end
     local char = LocalPlayer.Character
@@ -802,12 +851,12 @@ LocalPlayer.CharacterAdded:Connect(function() equippedSlot = nil end)
 task.spawn(function()
     while alive do
         task.wait(0.05)
-        if enabled and not travelling then
+        if enabled and not travelling and not menuPause() then
             local char = LocalPlayer.Character
             local humanoid = char and char:FindFirstChildOfClass("Humanoid")
             if humanoid and humanoid.Health > 0 then
                 for _, slot in ipairs(SLOTS) do
-                    if not (enabled and alive) then break end
+                    if not (enabled and alive) or menuPause() then break end
                     if useSlot[slot] and gameSlot[slot] and skillOfSlot(slot) and os.clock() - (lastGameCast[slot] or 0) >= gameInterval then
                         lastGameCast[slot] = os.clock()
                         local key = keyOfSlot(slot)
@@ -828,12 +877,15 @@ task.spawn(function()
                                 equippedSlot = slot
                             end
                             -- click on the middle of the screen, away from the skill bar
-                            local view = workspace.CurrentCamera.ViewportSize
-                            local x, y = view.X * 0.5, view.Y * 0.4
-                            VIM:SendMouseMoveEvent(x, y, game)
-                            VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
-                            task.wait(0.015) -- as short as possible, so the game's Auto M1 doesn't see a held button
-                            VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+                            -- (the menu may have been opened while the key was being pressed)
+                            if not menuPause() then
+                                local view = workspace.CurrentCamera.ViewportSize
+                                local x, y = view.X * 0.5, view.Y * 0.4
+                                VIM:SendMouseMoveEvent(x, y, game)
+                                VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+                                task.wait(0.015) -- as short as possible, so the game's Auto M1 doesn't see a held button
+                                VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+                            end
                             task.wait(0.05)
                         end
                     end
@@ -1364,7 +1416,7 @@ task.spawn(function()
         task.wait(1)
         if hiddenForPlay and not menuReason() then
             hiddenForPlay = false
-            if not Window:IsVisible() then Window:Toggle(true) end
+            if not Window:IsVisible() and not likeTheGameOn() then Window:Toggle(true) end
         end
     end
 end)
